@@ -59,3 +59,11 @@ class SPNet(FineTuning):
 
         reduction = 'mean'
         self.criterion = nn.CrossEntropyLoss(ignore_index=255, reduction=reduction)
+
+    def load_state_dict(self, checkpoint, strict=True):
+        if not strict:
+            del checkpoint["model"]['module.cls.class_emb']
+        self.model.load_state_dict(checkpoint["model"], strict=strict)
+        if strict:
+            self.optimizer.load_state_dict(checkpoint["optimizer"])
+            self.scheduler.load_state_dict(checkpoint["scheduler"])

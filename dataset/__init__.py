@@ -7,7 +7,7 @@ def get_dataset(opts, task):
     """ Dataset And Augmentation
     """
     train_transform = Compose([
-        RandomScale((0.75, 1.5)),
+        RandomScale((0.5, 1.5)),
         RandomCrop(opts.crop_size, pad_if_needed=True),
         RandomHorizontalFlip(),
         ToTensor(),
@@ -22,6 +22,7 @@ def get_dataset(opts, task):
                   std=[0.229, 0.224, 0.225]),
     ])
     test_transform = Compose([
+        CenterCrop(size=opts.crop_size),
         ToTensor(),
         Normalize(mean=[0.485, 0.456, 0.406],
                   std=[0.229, 0.224, 0.225]),

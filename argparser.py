@@ -13,6 +13,7 @@ def modify_command_options(opts):
 
     opts.no_cross_val = not opts.cross_val
     opts.pooling = round(opts.crop_size / opts.output_stride)
+    opts.crop_size_test = opts.crop_size if opts.crop_size_test is None else opts.crop_size_test
 
     return opts
 
@@ -60,6 +61,8 @@ def get_argparser():
                         help='batch size (default: 4)')
     parser.add_argument("--crop_size", type=int, default=512,
                         help="crop size (default: 512)")
+    parser.add_argument("--crop_size_test", type=int, default=None,
+                        help="test crop size (default: = --crop_size)")
 
     parser.add_argument("--lr", type=float, default=0.007,
                         help="learning rate (default: 0.007)")
@@ -117,9 +120,12 @@ def get_argparser():
     parser.add_argument("--cross_val", action='store_true', default=False,
                         help="If validate on training or on validation (default: Train)")
 
+    parser.add_argument("--step_ckpt", default=None, type=str,
+                        help="path to trained model at previous step. Leave it None if you want to use def path")
+
     # Method
     parser.add_argument("--method", type=str, default='FT',
-                        choices=['FT', 'SPN'],
+                        choices=['FT', 'SPN', 'COS'],
                         help="The method you want to use.")
     parser.add_argument("--embedding", type=str, default="fastnvec", choices=['word2vec', 'fasttext', 'fastnvec'])
 

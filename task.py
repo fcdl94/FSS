@@ -60,4 +60,7 @@ class Task:
         return {s: self.task_dict[s] for s in range(self.step+1)}
 
     def get_n_classes(self):
-        return [len(self.task_dict[s]) for s in range(self.step+1)]
+        r = [len(self.task_dict[s]) for s in range(self.step+1)]
+        if self.use_bkg:
+            r[0] += 1
+        return r

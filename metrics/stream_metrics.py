@@ -35,6 +35,7 @@ class StreamSegMetrics(_StreamMetrics):
     """
     Stream Metrics for Semantic Segmentation Task
     """
+
     def __init__(self, n_classes):
         super().__init__()
         self.n_classes = n_classes
@@ -48,17 +49,23 @@ class StreamSegMetrics(_StreamMetrics):
 
     def to_str(self, results):
         string = "\n"
+        ignore = ["Class IoU", "Class Acc", "Class Prec",
+                  "Confusion Matrix Pred", "Confusion Matrix", "Confusion Matrix Text"]
         for k, v in results.items():
-            if k!="Class IoU" and k!="Class Acc" and k!="Confusion Matrix":
-                string += "%s: %f\n"%(k, v)
-        
-        string+='Class IoU:\n'
-        for k, v in results['Class IoU'].items():
-            string += "\tclass %d: %s\n"%(k, str(v))
+            if k not in ignore:
+                string += "%s: %f\n" % (k, v)
 
-        string+='Class Acc:\n'
+        string += 'Class IoU:\n'
+        for k, v in results['Class IoU'].items():
+            string += "\tclass %d: %s\n" % (k, str(v))
+
+        string += 'Class Acc:\n'
         for k, v in results['Class Acc'].items():
-            string += "\tclass %d: %s\n"%(k, str(v))
+            string += "\tclass %d: %s\n" % (k, str(v))
+
+        string += 'Class Prec:\n'
+        for k, v in results['Class Prec'].items():
+            string += "\tclass %d: %s\n" % (k, str(v))
 
         return string
 
@@ -87,24 +94,32 @@ class StreamSegMetrics(_StreamMetrics):
         acc = diag.sum() / hist.sum()
         acc_cls_c = diag / (gt_sum + EPS)
         acc_cls = np.mean(acc_cls_c[mask])
+        precision_cls_c = diag / (hist.sum(axis=0) + EPS)
+        precision_cls = np.mean(precision_cls_c)
         iu = diag / (gt_sum + hist.sum(axis=0) - diag + EPS)
         mean_iu = np.mean(iu[mask])
         freq = hist.sum(axis=1) / hist.sum()
         fwavacc = (freq[freq > 0] * iu[freq > 0]).sum()
+
         cls_iu = dict(zip(range(self.n_classes), [iu[i] if m else "X" for i, m in enumerate(mask)]))
         cls_acc = dict(zip(range(self.n_classes), [acc_cls_c[i] if m else "X" for i, m in enumerate(mask)]))
+        cls_prec = dict(zip(range(self.n_classes), [precision_cls_c[i] if m else "X" for i, m in enumerate(mask)]))
 
         return {
-                "Total samples":  self.total_samples,
-                "Overall Acc": acc,
-                "Mean Acc": acc_cls,
-                "FreqW Acc": fwavacc,
-                "Mean IoU": mean_iu,
-                "Class IoU": cls_iu,
-                "Class Acc": cls_acc,
-                "Confusion Matrix": self.confusion_matrix_to_fig()
-            }
-        
+            "Total samples": self.total_samples,
+            "Overall Acc": acc,
+            "Mean Acc": acc_cls,
+            "Mean Precision": precision_cls,
+            "FreqW Acc": fwavacc,
+            "Mean IoU": mean_iu,
+            "Class IoU": cls_iu,
+            "Class Acc": cls_acc,
+            "Class Prec": cls_prec,
+            "Confusion Matrix Text": self.confusion_matrix_to_text(),
+            "Confusion Matrix": self.confusion_matrix_to_fig(),
+            "Confusion Matrix Pred": self.confusion_matrix_to_fig(norm_gt=False)
+        }
+
     def reset(self):
         self.confusion_matrix = np.zeros((self.n_classes, self.n_classes))
         self.total_samples = 0
@@ -121,8 +136,12 @@ class StreamSegMetrics(_StreamMetrics):
             self.confusion_matrix = confusion_matrix.cpu().numpy()
             self.total_samples = samples.cpu().numpy()
 
-    def confusion_matrix_to_fig(self):
-        cm = self.confusion_matrix.astype('float') / (self.confusion_matrix.sum(axis=1)+0.000001)[:, np.newaxis]
+    def confusion_matrix_to_fig(self, norm_gt=True):
+        if norm_gt:
+            div = (self.confusion_matrix.sum(axis=1) + 0.000001)[:, np.newaxis]
+        else:
+            div = (self.confusion_matrix.sum(axis=0) + 0.000001)[np.newaxis, :]
+        cm = self.confusion_matrix.astype('float') / div
         fig, ax = plt.subplots()
         im = ax.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
         ax.figure.colorbar(im, ax=ax)
@@ -133,6 +152,12 @@ class StreamSegMetrics(_StreamMetrics):
 
         fig.tight_layout()
         return fig
+
+    def confusion_matrix_to_text(self):
+        string = []
+        for i in range(self.n_classes):
+            string.append(f"{i} : {self.confusion_matrix[i].tolist()}")
+        return "\n" + "\n".join(string)
 
 
 class AverageMeter(object):

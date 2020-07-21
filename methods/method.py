@@ -34,10 +34,11 @@ class Method:
     def validate(self, loader, metrics, ret_samples_ids=None):
         raise NotImplementedError
 
-    def load_state_dict(self, checkpoint):
-        self.model.load_state_dict(checkpoint["model"], strict=True)
-        self.optimizer.load_state_dict(checkpoint["optimizer"])
-        self.scheduler.load_state_dict(checkpoint["scheduler"])
+    def load_state_dict(self, checkpoint, strict=True):
+        self.model.load_state_dict(checkpoint["model"], strict=strict)
+        if strict:
+            self.optimizer.load_state_dict(checkpoint["optimizer"])
+            self.scheduler.load_state_dict(checkpoint["scheduler"])
 
     def state_dict(self):
         state = {"model": self.model.state_dict(), "optimizer": self.optimizer.state_dict(),
@@ -73,19 +74,14 @@ class FineTuning(Method):
                        'weight_decay': opts.weight_decay})
 
         params.append({"params": filter(lambda p: p.requires_grad, self.model.head.parameters()),
-                       'weight_decay': opts.weight_decay})
+                       'weight_decay': opts.weight_decay, 'lr': opts.lr*10.})
 
         params.append({"params": filter(lambda p: p.requires_grad, self.model.cls.parameters()),
-                       'weight_decay': opts.weight_decay})
+                       'weight_decay': opts.weight_decay, 'lr': opts.lr*10.})
 
-        self.optimizer = torch.optim.SGD(params, lr=opts.lr, momentum=0.9, nesterov=True)
+        self.optimizer = torch.optim.SGD(params, lr=opts.lr, momentum=0.9, nesterov=False)
         self.scheduler = get_scheduler(opts, self.optimizer)
         self.logger.debug("Optimizer:\n%s" % self.optimizer)
-
-        self.model, self.optimizer = amp.initialize(self.model.to(self.device), self.optimizer, opt_level=opts.opt_level)
-
-        # Put the model on GPU
-        self.model = DistributedDataParallel(self.model, delay_allreduce=True)
 
         reduction = 'mean'
         self.criterion = nn.CrossEntropyLoss(ignore_index=255, reduction=reduction)
@@ -184,7 +180,7 @@ class FineTuning(Method):
 
                 if ret_samples_ids is not None and i in ret_samples_ids:  # get samples
                     ret_samples.append((images[0].detach().cpu().numpy(),
-                                        labels[0]))
+                                        labels[0], prediction[0]))
 
             # collect statistics from multiple processes
             metrics.synch(device)
