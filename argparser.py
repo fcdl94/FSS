@@ -50,6 +50,10 @@ def get_argparser():
                         help="Whether to use or not the background as a class (def is not)")
     parser.add_argument("--input_mix", default="novel", choices=['novel', 'both'],
                         help="Which class to use for FSL")
+    parser.add_argument("--masking", default=255, choices=[0, 255], type=int,
+                        help="Use background or ignore for new classes in training")
+    parser.add_argument("--no_mask", default=False, action='store_true',
+                        help="Disable mask novel image as in MiB")
 
     # Train Options
     parser.add_argument("--epochs", type=int, default=30,
@@ -125,7 +129,7 @@ def get_argparser():
 
     # Method
     parser.add_argument("--method", type=str, default='FT',
-                        choices=['FT', 'SPN', 'COS'],
+                        choices=['FT', 'SPN', 'COS', 'WI', 'AMP', 'FTC'],
                         help="The method you want to use.")
     parser.add_argument("--embedding", type=str, default="fastnvec", choices=['word2vec', 'fasttext', 'fastnvec'])
 

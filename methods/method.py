@@ -28,7 +28,10 @@ class Method:
     def initialize(self, opts):
         raise NotImplementedError
 
-    def train(self, cur_epoch, train_loader, print_int=10):
+    def warm_up(self, dataset):
+        pass
+
+    def train(self, cur_epoch, train_loader, print_int=10, n_iter=1):
         raise NotImplementedError
 
     def validate(self, loader, metrics, ret_samples_ids=None):
@@ -63,6 +66,9 @@ class FineTuning(Method):
                     out.append(mod(x))
                 return torch.cat(out, dim=1)
 
+            def imprint_weights(self, step, features):
+                self.cls[step].weight.data = features.view_as(self.cls[step].weight.data)
+
         self.model = make_model(opts, head_channels, Classifier(head_channels, self.task.get_n_classes()))
 
         if opts.fix_bn:
@@ -86,7 +92,7 @@ class FineTuning(Method):
         reduction = 'mean'
         self.criterion = nn.CrossEntropyLoss(ignore_index=255, reduction=reduction)
 
-    def train(self, cur_epoch, train_loader, print_int=10):
+    def train(self, cur_epoch, train_loader, print_int=10, n_iter=1):
         """Train and return epoch loss"""
         logger = self.logger
         optim = self.optimizer
@@ -101,38 +107,41 @@ class FineTuning(Method):
         interval_loss = 0.0
 
         model.train()
-        for cur_step, (images, labels) in enumerate(train_loader):
+        cur_step = 0
+        for iteration in range(n_iter):
+            for images, labels in train_loader:
 
-            images = images.to(device, dtype=torch.float32)
-            labels = labels.to(device, dtype=torch.long)
+                images = images.to(device, dtype=torch.float32)
+                labels = labels.to(device, dtype=torch.long)
 
-            optim.zero_grad()
-            outputs = model(images)
+                optim.zero_grad()
+                outputs = model(images)
 
-            # xxx Cross Entropy Loss
-            loss = criterion(outputs, labels)  # B x H x W
+                # xxx Cross Entropy Loss
+                loss = criterion(outputs, labels)  # B x H x W
 
-            loss_tot = loss
+                loss_tot = loss
 
-            with amp.scale_loss(loss_tot, optim) as scaled_loss:
-                scaled_loss.backward()
+                with amp.scale_loss(loss_tot, optim) as scaled_loss:
+                    scaled_loss.backward()
 
-            optim.step()
-            scheduler.step()
+                optim.step()
+                scheduler.step()
 
-            epoch_loss += loss.item()
-            interval_loss += loss.item()
+                epoch_loss += loss.item()
+                interval_loss += loss.item()
 
-            if (cur_step + 1) % print_int == 0:
-                interval_loss = interval_loss / print_int
-                logger.info(f"Epoch {cur_epoch}, Batch {cur_step + 1}/{len(train_loader)},"
-                            f" Loss={interval_loss}")
-                logger.debug(f"Loss made of: CE {loss}")
-                # visualization
-                if logger is not None:
-                    x = cur_epoch * len(train_loader) + cur_step + 1
-                    logger.add_scalar('Loss', interval_loss, x)
-                interval_loss = 0.0
+                cur_step += 1
+                if cur_step % print_int == 0:
+                    interval_loss = interval_loss / print_int
+                    logger.info(f"Epoch {cur_epoch}, Batch {cur_step}/{n_iter}*{len(train_loader)},"
+                                f" Loss={interval_loss}")
+                    logger.debug(f"Loss made of: CE {loss}")
+                    # visualization
+                    if logger is not None:
+                        x = cur_epoch * len(train_loader) + cur_step
+                        logger.add_scalar('Loss', interval_loss, x)
+                    interval_loss = 0.0
 
         # collect statistics from multiple processes
         epoch_loss = torch.tensor(epoch_loss).to(self.device)
@@ -142,8 +151,8 @@ class FineTuning(Method):
         torch.distributed.reduce(reg_loss, dst=0)
 
         if distributed.get_rank() == 0:
-            epoch_loss = epoch_loss / distributed.get_world_size() / len(train_loader)
-            reg_loss = reg_loss / distributed.get_world_size() / len(train_loader)
+            epoch_loss = epoch_loss / distributed.get_world_size() / (len(train_loader)*n_iter)
+            reg_loss = reg_loss / distributed.get_world_size() / (len(train_loader)*n_iter)
 
         logger.info(f"Epoch {cur_epoch}, Class Loss={epoch_loss}, Reg Loss={reg_loss}")
 
@@ -200,3 +209,40 @@ class FineTuning(Method):
                 logger.info(f"Validation, Class Loss={class_loss}, Reg Loss={reg_loss} (without scaling)")
 
         return (class_loss, reg_loss), score, ret_samples
+
+
+class FineTuningClassifier(FineTuning):
+    def initialize(self, opts):
+
+        head_channels = 256
+
+        class Classifier(nn.Module):
+            def __init__(self, channels, classes):
+                super().__init__()
+                self.cls = nn.ModuleList(
+                    [nn.Conv2d(channels, c, 1) for c in classes])
+
+            def forward(self, x):
+                out = []
+                for mod in self.cls:
+                    out.append(mod(x))
+                return torch.cat(out, dim=1)
+
+            def imprint_weights(self, step, features):
+                self.cls[step].weight.data = features.view_as(self.cls[step].weight.data)
+
+        self.model = make_model(opts, head_channels, Classifier(head_channels, self.task.get_n_classes()))
+
+        if opts.fix_bn:
+            self.model.fix_bn()
+
+        # xxx Set up optimizer
+        params = [{"params": filter(lambda p: p.requires_grad, self.model.cls.parameters()),
+                   'weight_decay': opts.weight_decay, 'lr': opts.lr * 10.}]
+
+        self.optimizer = torch.optim.SGD(params, lr=opts.lr, momentum=0.9, nesterov=False)
+        self.scheduler = get_scheduler(opts, self.optimizer)
+        self.logger.debug("Optimizer:\n%s" % self.optimizer)
+
+        reduction = 'mean'
+        self.criterion = nn.CrossEntropyLoss(ignore_index=255, reduction=reduction)

@@ -52,6 +52,29 @@ def get_step_ckpt(opts, logger, task_name):
     return step_checkpoint
 
 
+# =====  Log metrics on Tensorboard =====
+def log_val(logger, val_metrics, val_score, val_loss, ret_samples, denorm, label2color, cur_epoch):
+    logger.info(val_metrics.to_str(val_score))
+
+    # visualize validation score and samples
+    logger.add_scalar("V-Loss", val_loss[0] + val_loss[1], cur_epoch)
+    logger.add_scalar("V-Loss-reg", val_loss[1], cur_epoch)
+    logger.add_scalar("V-Loss-cls", val_loss[0], cur_epoch)
+    logger.add_scalar("Val_Overall_Acc", val_score['Overall Acc'], cur_epoch)
+    logger.add_scalar("Val_MeanIoU", val_score['Mean IoU'], cur_epoch)
+    logger.add_table("Val_Class_IoU", val_score['Class IoU'], cur_epoch)
+    logger.add_table("Val_Acc_IoU", val_score['Class Acc'], cur_epoch)
+    # logger.add_figure("Val_Confusion_Matrix", val_score['Confusion Matrix'], cur_epoch)
+
+    for k, (img, target, pred) in enumerate(ret_samples):
+        img = (denorm(img) * 255).astype(np.uint8)
+        target = label2color(target).transpose(2, 0, 1).astype(np.uint8)
+        pred = label2color(pred).transpose(2, 0, 1).astype(np.uint8)
+
+        concat_img = np.concatenate((img, target, pred), axis=2)  # concat along width
+        logger.add_image(f'Sample_{k}', concat_img, cur_epoch)
+
+
 def main(opts):
     distributed.init_process_group(backend='nccl', init_method='env://')
     device_id, device = opts.local_rank, torch.device(opts.local_rank)
@@ -93,9 +116,12 @@ def main(opts):
                                  sampler=DistributedSampler(val_dst, num_replicas=world_size, rank=rank),
                                  num_workers=opts.num_workers)
 
-    opts.max_iter = opts.epochs * len(train_loader)
+    train_iterations = 1 if task.step == 0 else 20//task.nshot
+    opts.max_iter = opts.epochs * len(train_loader) * train_iterations
+    if opts.max_iter == 0:
+        opts.max_iter = 1
     logger.info(f"Total batch size is {opts.batch_size * world_size}")
-    logger.info(f"Train loader contains {len(train_loader)} iterations per epoch")
+    logger.info(f"Train loader contains {len(train_loader)} iterations per epoch, multiplied by {train_iterations}")
     logger.info(f"Total iterations are {opts.max_iter}, corresponding to {opts.epochs} epochs")
 
     # xxx Set up model
@@ -112,6 +138,8 @@ def main(opts):
         del step_ckpt
 
     logger.debug(model)
+    if task.step > 0 and not opts.continue_ckpt and opts.ckpt is None:
+        model.warm_up(train_dst)
 
     # xxx Handle checkpoint to resume training
     best_score = 0.0
@@ -127,7 +155,7 @@ def main(opts):
         logger.info("[!] Model restored from %s" % opts.ckpt)
         del checkpoint
     else:
-        logger.info("[!] Train from scratch")
+        logger.info("[!] Train from the beginning of the task")
 
     # xxx Train procedure
     # print opts before starting training to log all parameters
@@ -149,19 +177,29 @@ def main(opts):
 
     # check if random is equal here.
     logger.print(torch.randint(0, 100, (1, 1)))
+
+    # =====  Initial Validation  =====
+    # logger.info("Validation on initialization without training")
+    # val_loss, val_score, ret_samples = model.validate(loader=val_loader, metrics=val_metrics,
+    #                                                   ret_samples_ids=sample_ids)
+    #
+    # logger.print("Done validation")
+    # logger.info(f"End of Validation {cur_epoch}/{opts.epochs}, Validation Loss={val_loss[0] + val_loss[1]},"
+    #             f" Class Loss={val_loss[0]}, Reg Loss={val_loss[1]} ")
+    # log_val(logger, val_metrics, val_score, val_loss, ret_samples, denorm, label2color, cur_epoch)
+
     # train/val here
     while cur_epoch < opts.epochs and not opts.test:
         # =====  Train  =====
         train_loader.sampler.set_epoch(cur_epoch)  # setup dataloader sampler
         start = time.time()
-        epoch_loss = model.train(cur_epoch=cur_epoch, train_loader=train_loader, print_int=opts.print_interval)
+        epoch_loss = model.train(cur_epoch=cur_epoch, train_loader=train_loader,
+                                 print_int=opts.print_interval, n_iter=train_iterations)
         end = time.time()
 
         logger.info(f"End of Epoch {cur_epoch}/{opts.epochs}, Average Loss={epoch_loss[0] + epoch_loss[1]},"
                     f" Class Loss={epoch_loss[0]}, Reg Loss={epoch_loss[1]} "
                     f"-- time: {int(end-start)//60}:{int(end-start)%60}")
-
-        # =====  Log metrics on Tensorboard =====
         logger.add_scalar("E-Loss", epoch_loss[0] + epoch_loss[1], cur_epoch)
         logger.add_scalar("E-Loss-reg", epoch_loss[1], cur_epoch)
         logger.add_scalar("E-Loss-cls", epoch_loss[0], cur_epoch)
@@ -175,34 +213,10 @@ def main(opts):
             logger.print("Done validation")
             logger.info(f"End of Validation {cur_epoch}/{opts.epochs}, Validation Loss={val_loss[0] + val_loss[1]},"
                         f" Class Loss={val_loss[0]}, Reg Loss={val_loss[1]} ")
-
-            logger.info(val_metrics.to_str(val_score))
-
-            # =====  Log metrics on Tensorboard =====
-            # visualize validation score and samples
-            logger.add_scalar("V-Loss", val_loss[0] + val_loss[1], cur_epoch)
-            logger.add_scalar("V-Loss-reg", val_loss[1], cur_epoch)
-            logger.add_scalar("V-Loss-cls", val_loss[0], cur_epoch)
-            logger.add_scalar("Val_Overall_Acc", val_score['Overall Acc'], cur_epoch)
-            logger.add_scalar("Val_MeanIoU", val_score['Mean IoU'], cur_epoch)
-            logger.add_table("Val_Class_IoU", val_score['Class IoU'], cur_epoch)
-            logger.add_table("Val_Acc_IoU", val_score['Class Acc'], cur_epoch)
-            # logger.add_figure("Val_Confusion_Matrix", val_score['Confusion Matrix'], cur_epoch)
-
-            for k, (img, target, pred) in enumerate(ret_samples):
-                img = (denorm(img) * 255).astype(np.uint8)
-                target = label2color(target).transpose(2, 0, 1).astype(np.uint8)
-                pred = label2color(pred).transpose(2, 0, 1).astype(np.uint8)
-
-                concat_img = np.concatenate((img, target, pred), axis=2)  # concat along width
-                logger.add_image(f'Sample_{k}', concat_img, cur_epoch)
-
-            # keep the metric to print them at the end of training
-            results["V-IoU"] = val_score['Class IoU']
-            results["V-Acc"] = val_score['Class Acc']
+            log_val(logger, val_metrics, val_score, val_loss, ret_samples, denorm, label2color, cur_epoch)
 
         # =====  Save Model  =====
-        if rank == 0:  # save best model at the last iteration
+        if rank == 0 and (cur_epoch + 1) % opts.ckpt_interval == 0:  # save best model at the last iteration
             score = val_score['Mean IoU'] if val_score is not None else 0.  # use last score we have
             # best model to build incremental steps
             if not opts.debug:
@@ -210,6 +224,18 @@ def main(opts):
                 logger.info("[!] Checkpoint saved.")
 
         cur_epoch += 1
+
+    # keep the metric to print them at the end of training
+    if val_score is not None:
+        results["V-IoU"] = val_score['Class IoU']
+        results["V-Acc"] = val_score['Class Acc']
+
+    # =====  Save Model  =====
+    if rank == 0:  # save best model at the last iteration
+        score = val_score['Mean IoU'] if val_score is not None else 0.  # use last score we have
+        if not opts.debug:
+            save_ckpt(checkpoint_path, model, cur_epoch, score)
+            logger.info("[!] Checkpoint saved.")
 
     torch.distributed.barrier()
 

@@ -5,11 +5,17 @@ alias exp='python -m torch.distributed.launch --nproc_per_node=1 run.py --opt_le
 shopt -s expand_aliases
 
 met=FT
-name=FT_usebg
+oname=FT_bgm0
+name=FT_mib
+ishot=0
 lr=1e-4
-exp --method ${met} --name ${name} --use_bkg --fix_bn --batch_size 10 --lr ${lr} --weight_decay 5e-4 --epochs 21 --step 0 --val_interval 20 --crop_size 320 --crop_size_test 512
-exp --method ${met} --name ${name} --use_bkg --fix_bn --batch_size 10 --lr ${lr} --weight_decay 5e-4 --epochs 1000 --step 1 --input_mix both --nshot 1 --val_interval 100 --crop_size 320 --crop_size_test 512
-exp --method ${met} --name ${name} --use_bkg --fix_bn --batch_size 10 --lr ${lr} --weight_decay 5e-4 --epochs 500 --step 1 --input_mix both --nshot 2 --val_interval 50 --crop_size 320 --crop_size_test 512
-exp --method ${met} --name ${name} --use_bkg --fix_bn --batch_size 10 --lr ${lr} --weight_decay 5e-4 --epochs 200 --step 1 --input_mix both --nshot 5 --val_interval 20 --crop_size 320 --crop_size_test 512
-exp --method ${met} --name ${name} --use_bkg --fix_bn --batch_size 10 --lr ${lr} --weight_decay 5e-4 --epochs 100 --step 1 --input_mix both --nshot 10 --val_interval 10 --crop_size 320 --crop_size_test 512
-exp --method ${met} --name ${name} --use_bkg --fix_bn --batch_size 10 --lr ${lr} --weight_decay 5e-4 --epochs 50 --step 1 --input_mix both --nshot 20 --val_interval 5 --crop_size 320 --crop_size_test 512
+gen_par="--masking 0 --use_bkg --fix_bn --batch_size 10 --lr ${lr} --weight_decay 5e-4 --crop_size 320 --crop_size_test 512"
+inc_par="--ishot ${ishot} --input_mix novel --epochs 50 --val_interval 50 --ckpt_interval 10"
+
+#exp --method ${met} --name ${name} ${gen_par} --epochs 21 --step 0 --val_interval 21
+ckpt=checkpoints/step/15-5-voc/${oname}_0.pth
+#exp --method ${met} --name ${name} ${gen_par} ${inc_par} --step 1 --nshot 1  --step_ckpt ${ckpt}
+exp --method ${met} --name ${name} ${gen_par} ${inc_par} --step 1 --nshot 2  --step_ckpt ${ckpt}
+exp --method ${met} --name ${name} ${gen_par} ${inc_par} --step 1 --nshot 5  --step_ckpt ${ckpt}
+exp --method ${met} --name ${name} ${gen_par} ${inc_par} --step 1 --nshot 10 --step_ckpt ${ckpt}
+exp --method ${met} --name ${name} ${gen_par} ${inc_par} --step 1 --nshot 20 --step_ckpt ${ckpt}

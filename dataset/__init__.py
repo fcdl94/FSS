@@ -33,15 +33,18 @@ def get_dataset(opts, task):
     else:
         raise NotImplementedError
 
-    train_dst = dataset(root=opts.data_root, task=task, train=True, transform=train_transform)
+    train_dst = dataset(root=opts.data_root, task=task, train=True, transform=train_transform,
+                        masking=opts.no_mask, masking_value=opts.masking)
 
     if opts.cross_val:
         train_len = int(0.8 * len(train_dst))
         val_len = len(train_dst)-train_len
         train_dst, val_dst = torch.utils.data.random_split(train_dst, [train_len, val_len])
     else:  # don't use cross_val
-        val_dst = dataset(root=opts.data_root, task=task, train=False, transform=val_transform)
+        val_dst = dataset(root=opts.data_root, task=task, train=False, transform=val_transform,
+                          masking_value=opts.masking)
 
-    test_dst = dataset(root=opts.data_root, task=task, train=False, transform=test_transform)
+    test_dst = dataset(root=opts.data_root, task=task, train=False, transform=test_transform,
+                       masking_value=opts.masking)
 
     return train_dst, val_dst, test_dst

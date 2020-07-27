@@ -1,9 +1,8 @@
-import tensorboardX
 import logging
 
 class Logger:
 
-    def __init__(self, logdir, rank, type='tensorboardX', debug=False, filename=None, summary=True, step=None):
+    def __init__(self, logdir, rank, type='torch', debug=False, filename=None, summary=True, step=None):
         self.logger = None
         self.type = type
         self.rank = rank
@@ -12,7 +11,11 @@ class Logger:
         self.summary = summary
         if summary:
             if type == 'tensorboardX':
+                import tensorboardX
                 self.logger = tensorboardX.SummaryWriter(logdir)
+            elif type == "torch":
+                from torch.utils.tensorboard import SummaryWriter
+                self.logger = SummaryWriter(logdir)
             else:
                 raise NotImplementedError
         else:
@@ -32,22 +35,22 @@ class Logger:
         self.info("Closing the Logger.")
 
     def add_scalar(self, tag, scalar_value, step=None):
-        if self.type == 'tensorboardX':
+        if self.is_not_none():
             tag = self._transform_tag(tag)
             self.logger.add_scalar(tag, scalar_value, step)
 
     def add_image(self, tag, image, step=None):
-        if self.type == 'tensorboardX':
+        if self.is_not_none():
             tag = self._transform_tag(tag)
             self.logger.add_image(tag, image, step)
 
     def add_figure(self, tag, image, step=None):
-        if self.type == 'tensorboardX':
+        if self.is_not_none():
             tag = self._transform_tag(tag)
             self.logger.add_figure(tag, image, step)
 
     def add_table(self, tag, tbl, step=None):
-        if self.type == 'tensorboardX':
+        if self.is_not_none():
             tag = self._transform_tag(tag)
             tbl_str = "<table width=\"100%\"> "
             tbl_str += "<tr> \
@@ -82,10 +85,14 @@ class Logger:
         return tag
 
     def add_results(self, results):
-        if self.type == 'tensorboardX':
+        if self.is_not_none():
             tag = self._transform_tag("Results")
             text = "<table width=\"100%\">"
             for k, res in results.items():
                 text += f"<tr><td>{k}</td>" + " ".join([str(f'<td>{x}</td>') for x in res.values()]) + "</tr>"
             text += "</table>"
             self.logger.add_text(tag, text)
+
+    def is_not_none(self):
+        return self.type != "None"
+

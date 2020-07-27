@@ -3,6 +3,15 @@ import numpy as np
 import bisect
 
 
+def cumsum(sequence):
+    r, s = [], 0
+    for e in sequence:
+        l = len(e)
+        r.append(l + s)
+        s += l
+    return r
+
+
 def group_images(dataset, labels):
     # Group images based on the label in LABELS (using labels not reordered)
     idxs = {lab: [] for lab in labels}
@@ -83,20 +92,11 @@ class ConcatDataset(torch.utils.data.Dataset):
         datasets (sequence): List of datasets to be concatenated
     """
 
-    @staticmethod
-    def cumsum(sequence):
-        r, s = [], 0
-        for e in sequence:
-            l = len(e)
-            r.append(l + s)
-            s += l
-        return r
-
     def __init__(self, datasets):
         super(ConcatDataset, self).__init__()
         assert len(datasets) > 0, 'datasets should not be an empty iterable'
         self.datasets = list(datasets)
-        self.cumulative_sizes = self.cumsum(self.datasets)
+        self.cumulative_sizes = cumsum(self.datasets)
 
     def __len__(self):
         return self.cumulative_sizes[-1]

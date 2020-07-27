@@ -66,14 +66,16 @@ class SegmentationModule(nn.Module):
         for par in self.parameters():
             par.requires_grad = False
 
-    def forward(self, x):
+    def forward(self, x, use_classifier=True):
 
         out = self._network(x)
 
         out_size = x.shape[-2:]
-        sem_logits = self.cls(out)
-        sem_logits = functional.interpolate(sem_logits, size=out_size, mode="bilinear", align_corners=False)
-
+        if use_classifier:
+            sem_logits = self.cls(out)
+            sem_logits = functional.interpolate(sem_logits, size=out_size, mode="bilinear", align_corners=False)
+        else:
+            sem_logits = out
         return sem_logits
 
     def fix_bn(self):
