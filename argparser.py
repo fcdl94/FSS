@@ -129,7 +129,7 @@ def get_argparser():
 
     # Method
     parser.add_argument("--method", type=str, default='FT',
-                        choices=['FT', 'SPN', 'COS', 'WI', 'AMP', 'FTC'],
+                        choices=['FT', 'SPN', 'COS', 'WI', 'AMP', 'FTC', 'MIB', 'LWF'],
                         help="The method you want to use.")
     parser.add_argument("--embedding", type=str, default="fastnvec", choices=['word2vec', 'fasttext', 'fastnvec'])
 

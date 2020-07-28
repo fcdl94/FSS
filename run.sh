@@ -4,9 +4,9 @@ export CUDA_VISIBLE_DEVICES=1
 alias exp='python -m torch.distributed.launch --nproc_per_node=1 run.py --opt_level O1'
 shopt -s expand_aliases
 
-met=FT
+met=MIB
 oname=FT_bgm0
-name=FT_mib
+name=MIB_mib
 ishot=0
 lr=1e-4
 gen_par="--masking 0 --use_bkg --fix_bn --batch_size 10 --lr ${lr} --weight_decay 5e-4 --crop_size 320 --crop_size_test 512"
