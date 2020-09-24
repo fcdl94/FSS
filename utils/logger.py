@@ -84,9 +84,9 @@ class Logger:
         tag = tag + f"/{self.step}" if self.step is not None else tag
         return tag
 
-    def add_results(self, results):
+    def add_results(self, results, tag="Results"):
         if self.is_not_none():
-            tag = self._transform_tag("Results")
+            tag = self._transform_tag(tag)
             text = "<table width=\"100%\">"
             for k, res in results.items():
                 text += f"<tr><td>{k}</td>" + " ".join([str(f'<td>{x}</td>') for x in res.values()]) + "</tr>"

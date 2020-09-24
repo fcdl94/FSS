@@ -1,9 +1,11 @@
 from .voc import VOCFSSDataset
-from .transform import Compose, RandomScale, RandomCrop, RandomHorizontalFlip, ToTensor, Normalize, CenterCrop
-import torch
+from .transform import Compose, RandomScale, RandomCrop, RandomHorizontalFlip, ToTensor, Normalize, CenterCrop, Resize
+import random
+from .utils import Subset
+TRAIN_CV = 0.8
 
 
-def get_dataset(opts, task):
+def get_dataset(opts, task, train=True):
     """ Dataset And Augmentation
     """
     train_transform = Compose([
@@ -16,13 +18,13 @@ def get_dataset(opts, task):
     ])
 
     val_transform = Compose([
-        CenterCrop(size=opts.crop_size),
+        Resize(size=opts.crop_size_test),
+        CenterCrop(size=opts.crop_size_test),
         ToTensor(),
         Normalize(mean=[0.485, 0.456, 0.406],
                   std=[0.229, 0.224, 0.225]),
     ])
     test_transform = Compose([
-        CenterCrop(size=opts.crop_size),
         ToTensor(),
         Normalize(mean=[0.485, 0.456, 0.406],
                   std=[0.229, 0.224, 0.225]),
@@ -33,18 +35,24 @@ def get_dataset(opts, task):
     else:
         raise NotImplementedError
 
-    train_dst = dataset(root=opts.data_root, task=task, train=True, transform=train_transform,
-                        masking=opts.no_mask, masking_value=opts.masking)
-
-    if opts.cross_val:
-        train_len = int(0.8 * len(train_dst))
-        val_len = len(train_dst)-train_len
-        train_dst, val_dst = torch.utils.data.random_split(train_dst, [train_len, val_len])
-    else:  # don't use cross_val
-        val_dst = dataset(root=opts.data_root, task=task, train=False, transform=val_transform,
-                          masking_value=opts.masking)
-
-    test_dst = dataset(root=opts.data_root, task=task, train=False, transform=test_transform,
-                       masking_value=opts.masking)
-
-    return train_dst, val_dst, test_dst
+    if train:
+        if opts.cross_val:
+            train_dst = dataset(root=opts.data_root, task=task, train=True, transform=None,
+                                masking=not opts.no_mask, masking_value=opts.masking)
+            train_len = int(TRAIN_CV * len(train_dst))
+            idx = list(range(len(train_dst)))
+            random.shuffle(idx)
+            train_dst = Subset(train_dst, idx[:train_len], train_transform)
+            val_dst = Subset(train_dst, idx[train_len:], val_transform)
+        else:
+            train_dst = dataset(root=opts.data_root, task=task, train=True, transform=train_transform,
+                                masking=not opts.no_mask, masking_value=opts.masking)
+            val_dst = dataset(root=opts.data_root, task=task, train=False, transform=val_transform,
+                              masking=not opts.no_mask, masking_value=opts.masking)
+        return train_dst, val_dst
+    else:
+        test_dst_all = dataset(root=opts.data_root, task=task, train=False, transform=test_transform,
+                               masking=False, masking_value=255)
+        test_dst_novel = dataset(root=opts.data_root, task=task, train=False, transform=test_transform,
+                                 masking=True, masking_value=255)
+        return test_dst_all, test_dst_novel

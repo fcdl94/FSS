@@ -31,13 +31,13 @@ def save_ckpt(path, model, epoch, best_score):
     torch.save(state, path)
 
 
-def get_step_ckpt(opts, logger, task_name):
+def get_step_ckpt(opts, logger, task_name, name):
     # xxx Get step checkpoint
     step_checkpoint = None
     if opts.step_ckpt is not None:
         path = opts.step_ckpt
     else:
-        path = f"checkpoints/step/{task_name}/{opts.name}_{opts.step - 1}.pth"
+        path = f"checkpoints/step/{task_name}/{name}_{opts.step - 1}.pth"
 
     # generate model from path
     if os.path.exists(path):
@@ -53,7 +53,7 @@ def get_step_ckpt(opts, logger, task_name):
 
 
 # =====  Log metrics on Tensorboard =====
-def log_val(logger, val_metrics, val_score, val_loss, ret_samples, denorm, label2color, cur_epoch):
+def log_val(logger, val_metrics, val_score, val_loss, cur_epoch):
     logger.info(val_metrics.to_str(val_score))
 
     # visualize validation score and samples
@@ -66,6 +66,8 @@ def log_val(logger, val_metrics, val_score, val_loss, ret_samples, denorm, label
     logger.add_table("Val_Acc_IoU", val_score['Class Acc'], cur_epoch)
     # logger.add_figure("Val_Confusion_Matrix", val_score['Confusion Matrix'], cur_epoch)
 
+
+def log_samples(logger, ret_samples, denorm, label2color, cur_epoch):
     for k, (img, target, pred) in enumerate(ret_samples):
         img = (denorm(img) * 255).astype(np.uint8)
         target = label2color(target).transpose(2, 0, 1).astype(np.uint8)
@@ -85,8 +87,9 @@ def main(opts):
 
     # Initialize logging
     task_name = f"{opts.task}-{opts.dataset}"
+    name = f"{opts.name}-s{task.nshot}" if task.nshot != -1 else f"{opts.name}"
     if task.nshot != -1:
-        logdir_full = f"{opts.logdir}/{task_name}/{opts.name}-s{task.nshot}/"
+        logdir_full = f"{opts.logdir}/{task_name}/{name}/"
     else:
         logdir_full = f"{opts.logdir}/{task_name}/{opts.name}/"
     if rank == 0:
@@ -96,7 +99,7 @@ def main(opts):
 
     logger.print(f"Device: {device}")
 
-    checkpoint_path = f"checkpoints/step/{task_name}/{opts.name}_{opts.step}.pth"
+    checkpoint_path = f"checkpoints/step/{task_name}/{name}_{opts.step}.pth"
     os.makedirs(f"checkpoints/step/{task_name}", exist_ok=True)
 
     # Set up random seed
@@ -105,14 +108,14 @@ def main(opts):
     np.random.seed(opts.random_seed)
     random.seed(opts.random_seed)
 
-    train_dst, val_dst, test_dst = get_dataset(opts, task)
+    train_dst, val_dst = get_dataset(opts, task, train=True)
     logger.info(f"Dataset: {opts.dataset}, Train set: {len(train_dst)}, Val set: {len(val_dst)},"
-                f" Test set: {len(test_dst)}, n_classes {opts.num_classes}")
+                f"n_classes {opts.num_classes}")
 
-    train_loader = data.DataLoader(train_dst, batch_size=opts.batch_size,
+    train_loader = data.DataLoader(train_dst, batch_size=min(opts.batch_size, len(train_dst)),
                                    sampler=DistributedSampler(train_dst, num_replicas=world_size, rank=rank),
                                    num_workers=opts.num_workers, drop_last=True)
-    val_loader = data.DataLoader(val_dst, batch_size=opts.batch_size,
+    val_loader = data.DataLoader(val_dst, batch_size=min(opts.batch_size, len(val_dst)),
                                  sampler=DistributedSampler(val_dst, num_replicas=world_size, rank=rank),
                                  num_workers=opts.num_workers)
 
@@ -120,7 +123,7 @@ def main(opts):
     opts.max_iter = opts.epochs * len(train_loader) * train_iterations
     if opts.max_iter == 0:
         opts.max_iter = 1
-    logger.info(f"Total batch size is {opts.batch_size * world_size}")
+    logger.info(f"Total batch size is {min(opts.batch_size, len(train_dst)) * world_size}")
     logger.info(f"Train loader contains {len(train_loader)} iterations per epoch, multiplied by {train_iterations}")
     logger.info(f"Total iterations are {opts.max_iter}, corresponding to {opts.epochs} epochs")
 
@@ -131,7 +134,7 @@ def main(opts):
     logger.info(f"[!] Model made with{'out' if opts.no_pretrained else ''} pre-trained")
     # IF step > 0 you need to reload pretrained
     if task.step > 0:
-        step_ckpt = get_step_ckpt(opts, logger, task_name)
+        step_ckpt = get_step_ckpt(opts, logger, task_name, name)
         model.load_state_dict(step_ckpt['model_state'], strict=False)  # False because of incr. classifiers
         logger.info(f"[!] Previous model loaded from {step_ckpt['path']}")
         # clean memory
@@ -160,12 +163,6 @@ def main(opts):
     # xxx Train procedure
     # print opts before starting training to log all parameters
     logger.add_table("Opts", vars(opts))
-
-    if rank == 0 and opts.sample_num > 0:
-        sample_ids = np.random.choice(len(val_loader), opts.sample_num, replace=False)  # sample idxs for visualization
-        logger.info(f"The samples id are {sample_ids}")
-    else:
-        sample_ids = None
 
     label2color = utils.Label2Color(cmap=utils.color_map(opts.dataset))  # convert labels to images
     denorm = utils.Denormalize(mean=[0.485, 0.456, 0.406],
@@ -207,13 +204,12 @@ def main(opts):
         # =====  Validation  =====
         if (cur_epoch + 1) % opts.val_interval == 0:
             logger.info("validate on val set...")
-            val_loss, val_score, ret_samples = model.validate(loader=val_loader, metrics=val_metrics,
-                                                              ret_samples_ids=sample_ids)
+            val_loss, val_score, _ = model.validate(loader=val_loader, metrics=val_metrics, ret_samples_ids=None)
 
             logger.print("Done validation")
             logger.info(f"End of Validation {cur_epoch}/{opts.epochs}, Validation Loss={val_loss[0] + val_loss[1]},"
                         f" Class Loss={val_loss[0]}, Reg Loss={val_loss[1]} ")
-            log_val(logger, val_metrics, val_score, val_loss, ret_samples, denorm, label2color, cur_epoch)
+            log_val(logger, val_metrics, val_score, val_loss, cur_epoch)
 
         # =====  Save Model  =====
         if rank == 0 and (cur_epoch + 1) % opts.ckpt_interval == 0:  # save best model at the last iteration
@@ -226,9 +222,9 @@ def main(opts):
         cur_epoch += 1
 
     # keep the metric to print them at the end of training
-    if val_score is not None:
-        results["V-IoU"] = val_score['Class IoU']
-        results["V-Acc"] = val_score['Class Acc']
+    # if val_score is not None:
+    #     results["V-IoU"] = val_score['Class IoU']
+    #     results["V-Acc"] = val_score['Class Acc']
 
     # =====  Save Model  =====
     if rank == 0:  # save best model at the last iteration
@@ -241,10 +237,20 @@ def main(opts):
 
     # xxx Test code!
     logger.info("*** Test the model on all seen classes...")
-    # make data loader
-    test_loader = data.DataLoader(test_dst, batch_size=opts.batch_size,
-                                  sampler=DistributedSampler(test_dst, num_replicas=world_size, rank=rank),
-                                  num_workers=opts.num_workers)
+    test_dst_all, test_dst_novel = get_dataset(opts, task, train=False)
+    # make data loader for all classes
+    test_loader_all = data.DataLoader(test_dst_all, batch_size=1,
+                                      sampler=DistributedSampler(test_dst_all, num_replicas=world_size, rank=rank),
+                                      num_workers=opts.num_workers)
+    test_loader_novel = data.DataLoader(test_dst_novel, batch_size=1,
+                                        sampler=DistributedSampler(test_dst_novel, num_replicas=world_size, rank=rank),
+                                        num_workers=opts.num_workers)
+
+    if rank == 0 and opts.sample_num > 0:
+        sample_ids = np.random.choice(len(test_loader_all), opts.sample_num, replace=False)  # sample idxs for visual.
+        logger.info(f"The samples id are {sample_ids}")
+    else:
+        sample_ids = None
 
     # load best model
     if opts.test:
@@ -254,23 +260,37 @@ def main(opts):
         logger.info(f"*** Model restored from {checkpoint_path}")
         del checkpoint
 
-    val_loss, val_score, _ = model.validate(loader=test_loader, metrics=val_metrics)
-    logger.print("Done test")
-    logger.info(f"*** End of Test, Total Loss={val_loss[0]+val_loss[1]},"
+    val_loss, val_score, ret_samples = model.validate(loader=test_loader_all, metrics=val_metrics,
+                                                      ret_samples_ids=sample_ids)
+    logger.print("Done test on all")
+    logger.info(f"*** End of Test on all, Total Loss={val_loss[0]+val_loss[1]},"
                 f" Class Loss={val_loss[0]}, Reg Loss={val_loss[1]}")
+
     logger.info(val_metrics.to_str(val_score))
-    logger.add_table("Test_Class_IoU", val_score['Class IoU'])
-    logger.add_table("Test_Class_Acc", val_score['Class Acc'])
+
+    log_samples(logger, ret_samples, denorm, label2color, 0)
+
     logger.add_figure("Test_Confusion_Matrix_Recall", val_score['Confusion Matrix'])
     logger.add_figure("Test_Confusion_Matrix_Precision", val_score["Confusion Matrix Pred"])
     results["T-IoU"] = val_score['Class IoU']
     results["T-Acc"] = val_score['Class Acc']
     results["T-Prec"] = val_score['Class Prec']
     logger.add_results(results)
-
     logger.add_scalar("T_Overall_Acc", val_score['Overall Acc'])
     logger.add_scalar("T_MeanIoU", val_score['Mean IoU'])
     logger.add_scalar("T_MeanAcc", val_score['Mean Acc'])
+
+    logger.info(f"*** Test the model on novel seen classes...")
+    val_loss, val_score, _ = model.validate(loader=test_loader_novel, metrics=val_metrics,
+                                            ret_samples_ids=None, novel=True)
+    logger.info(f"*** End of Test on novel, Total Loss={val_loss[0] + val_loss[1]},"
+                f" Class Loss={val_loss[0]}, Reg Loss={val_loss[1]}")
+    res_novel = {
+        "T-IoU": val_score['Class IoU'],
+        "T-Acc": val_score['Class Acc'],
+        "T-Prec": val_score['Class Prec'],
+    }
+    logger.add_results(res_novel, "Results_novel")
 
     logger.close()
 

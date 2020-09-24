@@ -1,5 +1,5 @@
 from .method import Method
-from torch import distributed
+from .imprinting import WeightImprinting
 import torch.nn as nn
 from .utils import get_scheduler
 from apex import amp
@@ -7,19 +7,18 @@ from apex.parallel import DistributedDataParallel
 from .segmentation_module import make_model
 import torch
 from utils.loss import UnbiasedCrossEntropy, UnbiasedKnowledgeDistillationLoss, KnowledgeDistillationLoss
-from modules.classifier import IncrementalClassifier
+from modules.classifier import IncrementalClassifier, CosineClassifier
 
 
 class LwF(Method):
     def __init__(self, task, device, logger, opts):
         super().__init__(task, device, logger, opts)
-        head_channels = 256
 
-        classifier = self.get_classifier(head_channels, self.task.get_n_classes())
-        self.model = make_model(opts, head_channels, classifier)
+        classifier = self.get_classifier(opts, self.task.get_n_classes())
+        self.model = make_model(opts, classifier)
         if task.step > 0:
-            cl_old = self.get_classifier(head_channels, self.task.get_n_classes()[:-1])
-            self.model_old = make_model(opts, head_channels, cl_old)
+            cl_old = self.get_classifier(opts, self.task.get_n_classes()[:-1])
+            self.model_old = make_model(opts, cl_old)
             # put the old model into distributed memory and freeze it
             for par in self.model_old.parameters():
                 par.requires_grad = False
@@ -36,10 +35,10 @@ class LwF(Method):
                        'weight_decay': opts.weight_decay})
 
         params.append({"params": filter(lambda p: p.requires_grad, self.model.head.parameters()),
-                       'weight_decay': opts.weight_decay, 'lr': opts.lr*10.})
+                       'weight_decay': opts.weight_decay, 'lr': opts.lr * opts.lr_head})
 
         params.append({"params": filter(lambda p: p.requires_grad, self.model.cls.parameters()),
-                       'weight_decay': opts.weight_decay, 'lr': opts.lr*10.})
+                       'weight_decay': opts.weight_decay, 'lr': opts.lr * opts.lr_cls})
 
         self.optimizer = torch.optim.SGD(params, lr=opts.lr, momentum=0.9, nesterov=False)
         self.scheduler = get_scheduler(opts, self.optimizer)
@@ -59,8 +58,8 @@ class LwF(Method):
         # Put the model on GPU
         self.model = DistributedDataParallel(self.model, delay_allreduce=True)
 
-    def get_classifier(self, head_channels, classes):
-        return IncrementalClassifier(head_channels, classes)
+    def get_classifier(self, opts, classes):
+        return IncrementalClassifier(classes)
 
     def get_criterion(self, task, reduction):
         return nn.CrossEntropyLoss(ignore_index=255, reduction=reduction)
@@ -93,17 +92,32 @@ class MiB(LwF):
     def get_regularizer(self):
         return UnbiasedKnowledgeDistillationLoss()
 
-    # def warm_up(self, dataset):
-    #     if self.task.use_bkg:
-    #         cls = self.model.module.cls.cls
-    #         imprinting_w = cls[0].weight[0]
-    #         bkg_bias = cls[0].bias[0]
-    #
-    #         bias_diff = torch.log(torch.FloatTensor([len(cls[-1].weight) + 1])).to(self.device)
-    #
-    #         new_bias = (bkg_bias - bias_diff)
-    #
-    #         cls[-1].weight.data.copy_(imprinting_w)
-    #         cls[-1].bias.data.copy_(new_bias)
-    #
-    #         cls[0].bias[0].data.copy_(new_bias.squeeze(0))
+    def warm_up(self, dataset):
+        if self.task.use_bkg:
+            cls = self.model.module.cls.cls
+            imprinting_w = cls[0].weight[0]
+            bkg_bias = cls[0].bias[0]
+
+            bias_diff = torch.log(torch.FloatTensor([len(cls[-1].weight) + 1])).to(self.device)
+
+            new_bias = (bkg_bias - bias_diff)
+
+            cls[-1].weight.data.copy_(imprinting_w)
+            cls[-1].bias.data.copy_(new_bias)
+
+            cls[0].bias[0].data.copy_(new_bias.squeeze(0))
+
+
+class MiB_WI(LwF, WeightImprinting):
+    def get_criterion(self, task, reduction):
+        return UnbiasedCrossEntropy(ignore_index=255, reduction=reduction,
+                                    old_cl=len(task.get_order()) - len(task.get_novel_labels()))
+
+    def get_regularizer(self):
+        return UnbiasedKnowledgeDistillationLoss()
+
+    def get_classifier(self, opts, classes):
+        return CosineClassifier(classes, channels=256)
+
+    def initialize(self, opts):
+        pass

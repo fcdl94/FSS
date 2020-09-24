@@ -13,7 +13,7 @@ import models
 from modules import DeeplabV3
 
 
-def make_model(opts, head_channels=256, cls=None):
+def make_model(opts, cls=None, head_channels=None):
     if opts.norm_act == 'iabn_sync':
         norm = partial(InPlaceABNSync, activation="leaky_relu", activation_param=.01)
     elif opts.norm_act == 'iabn':
@@ -33,11 +33,16 @@ def make_model(opts, head_channels=256, cls=None):
         body.load_state_dict(pre_dict['state_dict'])
         del pre_dict  # free memory
 
-    head = DeeplabV3(body.out_channels, head_channels, 256, norm_act=norm,
-                     out_stride=opts.output_stride, pooling_size=opts.pooling)
-
     if cls is None:
+        if head_channels is None:
+            raise ValueError("One among cls and head_channels must be specified.")
         cls = nn.Conv2d(head_channels, opts.num_classes, 1)
+        cls.channels = head_channels
+    else:
+        head_channels = cls.channels
+
+    head = DeeplabV3(body.out_channels, head_channels, 256, norm_act=norm,
+                     out_stride=opts.output_stride, pooling_size=opts.pooling, last_relu=opts.relu)
 
     model = SegmentationModule(body, head, head_channels, cls)
 

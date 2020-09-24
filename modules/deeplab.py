@@ -12,7 +12,8 @@ class DeeplabV3(nn.Module):
                  hidden_channels=256,
                  out_stride=16,
                  norm_act=nn.BatchNorm2d,
-                 pooling_size=None):
+                 pooling_size=None,
+                 last_relu=False):
         super(DeeplabV3, self).__init__()
         self.pooling_size = pooling_size
 
@@ -20,6 +21,8 @@ class DeeplabV3(nn.Module):
             dilations = [6, 12, 18]
         elif out_stride == 8:
             dilations = [12, 24, 36]
+        else:
+            raise NotImplementedError
 
         self.map_convs = nn.ModuleList([
             nn.Conv2d(in_channels, hidden_channels, 1, bias=False),
@@ -28,13 +31,15 @@ class DeeplabV3(nn.Module):
             nn.Conv2d(in_channels, hidden_channels, 3, bias=False, dilation=dilations[2], padding=dilations[2])
         ])
         self.map_bn = norm_act(hidden_channels * 4)
+        self.red_conv = nn.Conv2d(hidden_channels * 4, out_channels, 1, bias=False)
 
         self.global_pooling_conv = nn.Conv2d(in_channels, hidden_channels, 1, bias=False)
         self.global_pooling_bn = norm_act(hidden_channels)
-
-        self.red_conv = nn.Conv2d(hidden_channels * 4, out_channels, 1, bias=False)
         self.pool_red_conv = nn.Conv2d(hidden_channels, out_channels, 1, bias=False)
-        self.red_bn = norm_act(out_channels)
+
+        self.last_relu = last_relu
+        if last_relu:
+            self.red_bn = norm_act(out_channels)
 
         if norm_act != nn.BatchNorm2d:
             self.reset_parameters(self.map_bn.activation, self.map_bn.activation_param)
@@ -67,7 +72,8 @@ class DeeplabV3(nn.Module):
             pool = pool.repeat(1, 1, x.size(2), x.size(3))
 
         out += pool
-        out = self.red_bn(out)
+        if self.last_relu:
+            out = self.red_bn(out)
         return out
 
     def _global_pooling(self, x):

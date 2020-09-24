@@ -11,6 +11,7 @@ def modify_command_options(opts):
     if not opts.visualize:
         opts.sample_num = 0
 
+    opts.use_bkg = not opts.no_use_bkg
     opts.no_cross_val = not opts.cross_val
     opts.pooling = round(opts.crop_size / opts.output_stride)
     opts.crop_size_test = opts.crop_size if opts.crop_size_test is None else opts.crop_size_test
@@ -46,11 +47,11 @@ def get_argparser():
                         help="If step>0, the shot to use for FSL (Def=5)")
     parser.add_argument("--ishot", type=int, default=0,
                         help="First index where to sample shots")
-    parser.add_argument("--use_bkg", default=False, action='store_true',
+    parser.add_argument("--no_use_bkg", default=False, action='store_true',
                         help="Whether to use or not the background as a class (def is not)")
     parser.add_argument("--input_mix", default="novel", choices=['novel', 'both'],
                         help="Which class to use for FSL")
-    parser.add_argument("--masking", default=255, choices=[0, 255], type=int,
+    parser.add_argument("--masking", default=0, choices=[0, 255], type=int,
                         help="Use background or ignore for new classes in training")
     parser.add_argument("--no_mask", default=False, action='store_true',
                         help="Disable mask novel image as in MiB")
@@ -68,8 +69,12 @@ def get_argparser():
     parser.add_argument("--crop_size_test", type=int, default=None,
                         help="test crop size (default: = --crop_size)")
 
-    parser.add_argument("--lr", type=float, default=0.007,
-                        help="learning rate (default: 0.007)")
+    parser.add_argument("--lr", type=float, default=0.01,
+                        help="learning rate (default: 0.01)")
+    parser.add_argument("--lr_head", type=float, default=1,
+                        help="learning rate scaler for ASPP (default: 1)")
+    parser.add_argument("--lr_cls", type=float, default=1,
+                        help="learning rate scaler for classifier (default: 1)")
     parser.add_argument("--momentum", type=float, default=0.9,
                         help='momentum for SGD (default: 0.9)')
     parser.add_argument("--weight_decay", type=float, default=1e-4,
@@ -111,6 +116,8 @@ def get_argparser():
                         choices=['iabn_sync', 'iabn', 'abn', 'std'], help='Which BN to use (def: abn_sync')
     parser.add_argument("--fusion-mode", metavar="NAME", type=str, choices=["mean", "voting", "max"], default="mean",
                         help="How to fuse the outputs. Options: 'mean', 'voting', 'max'")
+    parser.add_argument("--relu", default=False, action='store_true',
+                        help='Use this to enable last BN+ReLU on Deeplab-v3 (def. False)')
 
     # Test and Checkpoint options
     parser.add_argument("--test",  action='store_true', default=False,
@@ -129,8 +136,10 @@ def get_argparser():
 
     # Method
     parser.add_argument("--method", type=str, default='FT',
-                        choices=['FT', 'SPN', 'COS', 'WI', 'AMP', 'FTC', 'MIB', 'LWF'],
+                        choices=['FT', 'SPN', 'COS', 'CFTC', 'WI', 'AMP', 'FTC', 'MIB', 'LWF', 'MIB-SPN', 'MIB-WI'],
                         help="The method you want to use.")
     parser.add_argument("--embedding", type=str, default="fastnvec", choices=['word2vec', 'fasttext', 'fastnvec'])
+    parser.add_argument("--amp_alpha", type=float, default=1.,
+                        help='Alpha value for the proxy adaptation.')
 
     return parser

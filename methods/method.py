@@ -15,6 +15,7 @@ class Method:
         self.scheduler = None
         self.regularizer = None
         self.model_old = None
+        self.novel_classes = self.task.get_n_classes()[-1]
 
         self.initialize(opts)  # setup the model, optimizer, scheduler and criterion
 
@@ -102,7 +103,7 @@ class Method:
 
         return epoch_loss, reg_loss
 
-    def validate(self, loader, metrics, ret_samples_ids=None):
+    def validate(self, loader, metrics, ret_samples_ids=None, novel=False):
         """Do validation and return specified samples"""
         metrics.reset()
         model = self.model
@@ -120,7 +121,9 @@ class Method:
                 images = images.to(device, dtype=torch.float32)
                 labels = labels.to(device, dtype=torch.long)
 
-                outputs = model(images)
+                outputs = model(images)  # B, C, H, W
+                if novel:
+                    outputs[:, 1:-self.novel_classes] = -float("Inf")
 
                 loss = criterion(outputs, labels)
 
