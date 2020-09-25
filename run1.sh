@@ -1,25 +1,20 @@
 #!/bin/bash
 
-export CUDA_VISIBLE_DEVICES=1
-alias exp='python -m torch.distributed.launch --master_port 6665 --nproc_per_node=1 run.py --opt_level O0'
+export CUDA_VISIBLE_DEVICES=$1
+port=$2
+alias exp="python -m torch.distributed.launch --master_port ${port} --nproc_per_node=1 run.py --opt_level O0"
 shopt -s expand_aliases
 
-met=AMP
-oname=FT_ns
-name=${met}alpha025_ns
-ishot=0
 lr=1e-4
-epochs=50
 task=15-5
+path=checkpoints/step/15-5-voc
 
-gen_par="--task ${task} --no_mask --masking 255 --batch_size 10 --lr ${lr} --crop_size 512"
-inc_par="--ishot ${ishot} --input_mix novel --epochs ${epochs} --val_interval 10 --ckpt_interval 10"
+gen_par="--task ${task} --batch_size 10 --lr ${lr} --crop_size 512"
+inc_par="--input_mix novel --val_interval 10 --ckpt_interval 10"
 
-ckpt=checkpoints/step/15-5-voc/${oname}_0.pth
-
-for ns in 1 5 10; do
-  exp --method ${met} --name ${name} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${ckpt} --amp_alpha 0.25
-##  for s in 2 3 4 5; do
-##   exp --method ${met} --name ${name} ${gen_par} ${inc_par} --step $s --nshot ${ns}
-##  done
+oname=SPN_ns
+for is in 0 1 2 3 4; do
+  for ns in 1 5 10; do
+    exp --method SPN --name SPN_notrain_ns --epochs 0 ${gen_par} ${inc_par} --step 1 --nshot ${ns} --ishot ${is} --step_ckpt ${path}/${oname}_0.pth
+  done
 done

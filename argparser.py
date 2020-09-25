@@ -5,13 +5,10 @@ import task
 def modify_command_options(opts):
     if opts.dataset == 'voc':
         opts.num_classes = 21
-    if opts.dataset == 'ade':
-        opts.num_classes = 150
 
     if not opts.visualize:
         opts.sample_num = 0
 
-    opts.use_bkg = not opts.no_use_bkg
     opts.no_cross_val = not opts.cross_val
     opts.pooling = round(opts.crop_size / opts.output_stride)
     opts.crop_size_test = opts.crop_size if opts.crop_size_test is None else opts.crop_size_test
@@ -47,14 +44,8 @@ def get_argparser():
                         help="If step>0, the shot to use for FSL (Def=5)")
     parser.add_argument("--ishot", type=int, default=0,
                         help="First index where to sample shots")
-    parser.add_argument("--no_use_bkg", default=False, action='store_true',
-                        help="Whether to use or not the background as a class (def is not)")
     parser.add_argument("--input_mix", default="novel", choices=['novel', 'both'],
                         help="Which class to use for FSL")
-    parser.add_argument("--masking", default=0, choices=[0, 255], type=int,
-                        help="Use background or ignore for new classes in training")
-    parser.add_argument("--no_mask", default=False, action='store_true',
-                        help="Disable mask novel image as in MiB")
 
     # Train Options
     parser.add_argument("--epochs", type=int, default=30,

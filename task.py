@@ -84,7 +84,7 @@ class Task:
         self.input_mix = opts.input_mix  # novel / both / seen
 
         self.num_classes = len(self.order)
-        self.use_bkg = opts.use_bkg
+        self.use_bkg = True if opts.dataset == 'voc' else False
         if self.use_bkg:
             self.order.insert(0, 0)
             self.background_label = 0
