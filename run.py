@@ -87,7 +87,7 @@ def main(opts):
 
     # Initialize logging
     task_name = f"{opts.task}-{opts.dataset}"
-    name = f"{opts.name}-s{task.nshot}" if task.nshot != -1 else f"{opts.name}"
+    name = f"{opts.name}-s{task.nshot}-i{task.ishot}" if task.nshot != -1 else f"{opts.name}"
     if task.nshot != -1:
         logdir_full = f"{opts.logdir}/{task_name}/{name}/"
     else:
@@ -280,6 +280,9 @@ def main(opts):
     logger.add_scalar("T_MeanIoU", val_score['Mean IoU'])
     logger.add_scalar("T_MeanAcc", val_score['Mean Acc'])
 
+    task_log = opts.task + "-" + str(task.nshot) + str(task.ishot) if task.nshot != -1 else opts.task
+    logger.log_results(task=task_log, name=opts.name, results=val_score['Class IoU'].values())
+
     logger.info(f"*** Test the model on novel seen classes...")
     val_loss, val_score, _ = model.validate(loader=test_loader_novel, metrics=val_metrics,
                                             ret_samples_ids=None, novel=True)
@@ -291,6 +294,7 @@ def main(opts):
         "T-Prec": val_score['Class Prec'],
     }
     logger.add_results(res_novel, "Results_novel")
+    logger.log_results(task=task_log, name=opts.name, results=val_score['Class IoU'].values(), novel=True)
 
     logger.close()
 

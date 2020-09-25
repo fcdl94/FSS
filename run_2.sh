@@ -18,7 +18,7 @@ inc_par="--ishot ${ishot} --input_mix novel --epochs ${epochs} --val_interval 50
 #ckpt=checkpoints/step/15-5-voc/${oname}_0.pth
 #exp --method COS --name COS_ns   ${gen_par} --epochs 30 --step 0 --val_interval 1 # --test --ckpt ${ckpt}
 #exp --method COS --name COS_ns_relu --relu ${gen_par} --epochs 30 --step 0 --val_interval 1 # --test --ckpt ${ckpt}
-exp --method SPN --name SPN_ns   ${gen_par} --epochs 30 --step 0 --val_interval 1 # --test --ckpt ${ckpt}
+#exp --method SPN --name SPN_ns   ${gen_par} --epochs 30 --step 0 --val_interval 1 # --test --ckpt ${ckpt}
 #exp --method SPN --name SPN_ns_relu --relu  ${gen_par} --epochs 30 --step 0 --val_interval 1 # --test --ckpt ${ckpt}
 
 

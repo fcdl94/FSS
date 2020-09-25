@@ -10,8 +10,7 @@ class FSSDataset(data.Dataset):
                  task,
                  train=True,
                  transform=None,
-                 masking=True,
-                 masking_value=255):
+                 masking=False):
 
         self.full_data = self.make_dataset(root, train)
         self.transform = transform
@@ -21,8 +20,7 @@ class FSSDataset(data.Dataset):
         self.labels = task.get_novel_labels()
         self.labels_old = task.get_old_labels(bkg=False)
         assert not any(l in self.labels_old for l in self.labels), "Labels and labels_old must be disjoint sets"
-
-        self.masking_value = masking_value
+        self.masking_value = masking_value = 255
 
         self.inverted_order = {lb: self.order.index(lb) for lb in self.order}
         if train:
@@ -36,11 +34,7 @@ class FSSDataset(data.Dataset):
         if not train:
             # in test we always use all images
             idxs = list(range(len(self.full_data)))
-            if masking:  # we are validating
-                target_transform = self.get_mapping_transform(self.labels, masking=True, masking_value=masking_value)
-            else:  # we are in test
-                # if masking is false it will use all the labels in inverted_order, so we can pass None.
-                target_transform = self.get_mapping_transform(None, False, masking_value)
+            target_transform = self.get_mapping_transform(self.labels, masking=masking, masking_value=masking_value)
 
         elif step == 0 or task.nshot == -1:
             # if we use all images we are also sampling images not useful - such as images with only ignore pixels!

@@ -80,8 +80,6 @@ class Task:
 
         self.nshot = opts.nshot if self.step > 0 else -1
         self.ishot = opts.ishot
-        self.masking = opts.masking
-        self.masking_novel = opts.no_mask
 
         self.input_mix = opts.input_mix  # novel / both / seen
 

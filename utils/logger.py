@@ -1,4 +1,6 @@
 import logging
+import os
+
 
 class Logger:
 
@@ -7,7 +9,7 @@ class Logger:
         self.type = type
         self.rank = rank
         self.step = step
-
+        self.logdir_results = os.path.join("logs", "results")
         self.summary = summary
         if summary:
             if type == 'tensorboardX':
@@ -25,6 +27,7 @@ class Logger:
         logging.basicConfig(filename=filename, level=logging.INFO, format=f'%(levelname)s:rank{rank}: %(message)s')
 
         if rank == 0:
+            os.makedirs(self.logdir_results, exist_ok=True)
             logging.info(f"[!] starting logging at directory {logdir}")
             if self.debug_flag:
                 logging.info(f"[!] Entering DEBUG mode")
@@ -66,6 +69,15 @@ class Logger:
             tbl_str += "</table>"
             self.logger.add_text(tag, tbl_str, step)
 
+    def add_results(self, results, tag="Results"):
+        if self.is_not_none():
+            tag = self._transform_tag(tag)
+            text = "<table width=\"100%\">"
+            for k, res in results.items():
+                text += f"<tr><td>{k}</td>" + " ".join([str(f'<td>{x}</td>') for x in res.values()]) + "</tr>"
+            text += "</table>"
+            self.logger.add_text(tag, text)
+
     def print(self, msg):
         logging.info(msg)
 
@@ -80,18 +92,20 @@ class Logger:
     def error(self, msg):
         logging.error(msg)
 
+    def log_results(self, task, name, results, novel=False):
+        if self.rank == 0:
+            file_name = f"{task}.csv" if not novel else f"{task}_novel.csv"
+            path = f"{self.logdir_results}/{file_name}"
+            text = [name]
+            for val in results:
+                text.append(str(val))
+            row = ",".join(text) + "\n"
+            with open(path, "a") as file:
+                file.write(row)
+
     def _transform_tag(self, tag):
         tag = tag + f"/{self.step}" if self.step is not None else tag
         return tag
-
-    def add_results(self, results, tag="Results"):
-        if self.is_not_none():
-            tag = self._transform_tag(tag)
-            text = "<table width=\"100%\">"
-            for k, res in results.items():
-                text += f"<tr><td>{k}</td>" + " ".join([str(f'<td>{x}</td>') for x in res.values()]) + "</tr>"
-            text += "</table>"
-            self.logger.add_text(tag, text)
 
     def is_not_none(self):
         return self.type != "None"

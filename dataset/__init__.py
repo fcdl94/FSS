@@ -37,22 +37,18 @@ def get_dataset(opts, task, train=True):
 
     if train:
         if opts.cross_val:
-            train_dst = dataset(root=opts.data_root, task=task, train=True, transform=None,
-                                masking=not opts.no_mask, masking_value=opts.masking)
+            train_dst = dataset(root=opts.data_root, task=task, train=True, transform=None)
             train_len = int(TRAIN_CV * len(train_dst))
             idx = list(range(len(train_dst)))
             random.shuffle(idx)
             train_dst = Subset(train_dst, idx[:train_len], train_transform)
             val_dst = Subset(train_dst, idx[train_len:], val_transform)
         else:
-            train_dst = dataset(root=opts.data_root, task=task, train=True, transform=train_transform,
-                                masking=not opts.no_mask, masking_value=opts.masking)
-            val_dst = dataset(root=opts.data_root, task=task, train=False, transform=val_transform,
-                              masking=not opts.no_mask, masking_value=opts.masking)
+            train_dst = dataset(root=opts.data_root, task=task, train=True, transform=train_transform)
+            val_dst = dataset(root=opts.data_root, task=task, train=False, transform=val_transform)
         return train_dst, val_dst
     else:
-        test_dst_all = dataset(root=opts.data_root, task=task, train=False, transform=test_transform,
-                               masking=False, masking_value=255)
+        test_dst_all = dataset(root=opts.data_root, task=task, train=False, transform=test_transform)
         test_dst_novel = dataset(root=opts.data_root, task=task, train=False, transform=test_transform,
-                                 masking=True, masking_value=255)
+                                 masking=True)
         return test_dst_all, test_dst_novel

@@ -84,7 +84,7 @@ class Method:
                     logger.debug(f"Loss made of: CE {loss}")
                     # visualization
                     if logger is not None:
-                        x = cur_epoch * len(train_loader) + cur_step
+                        x = cur_epoch * len(train_loader) * n_iter + cur_step
                         logger.add_scalar('Loss', interval_loss, x)
                     interval_loss = 0.0
 
