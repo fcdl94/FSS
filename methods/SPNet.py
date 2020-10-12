@@ -31,7 +31,7 @@ class SPNet(Method):
         self.scheduler = get_scheduler(opts, self.optimizer)
         self.logger.debug("Optimizer:\n%s" % self.optimizer)
 
-        reduction = 'mean'
+        reduction = 'none'
         self.criterion = nn.CrossEntropyLoss(ignore_index=255, reduction=reduction)
 
     def load_state_dict(self, checkpoint, strict=True):
@@ -74,7 +74,7 @@ class SPNet_LwF(Method):
         self.scheduler = get_scheduler(opts, self.optimizer)
         self.logger.debug("Optimizer:\n%s" % self.optimizer)
 
-        reduction = 'mean'
+        reduction = 'none'
         if self.task.step == 0:
             self.criterion = nn.CrossEntropyLoss(ignore_index=255, reduction=reduction)
             self.model, self.optimizer = amp.initialize(self.model.to(self.device), self.optimizer,

@@ -1,16 +1,13 @@
 import torch
-import torchvision
 import torch.nn as nn
-from torch import distributed
 import torch.nn.functional as functional
 
 import inplace_abn
 from inplace_abn import InPlaceABNSync, InPlaceABN, ABN
-
-from functools import partial, reduce
+from functools import partial
 
 import models
-from modules import DeeplabV3
+from modules import DeeplabV3, DeeplabV2
 
 
 def make_model(opts, cls=None, head_channels=None):
@@ -41,8 +38,15 @@ def make_model(opts, cls=None, head_channels=None):
     else:
         head_channels = cls.channels
 
-    head = DeeplabV3(body.out_channels, head_channels, 256, norm_act=norm,
-                     out_stride=opts.output_stride, pooling_size=opts.pooling, last_relu=opts.relu)
+    if opts.deeplab == 'v3':
+        head = DeeplabV3(body.out_channels, head_channels, 256, norm_act=norm,
+                         out_stride=opts.output_stride, pooling_size=opts.pooling,
+                         pooling=not opts.no_pooling, last_relu=opts.relu)
+    elif opts.deeplab == 'v2':
+        head = DeeplabV2(body.out_channels, head_channels, 256, norm_act=norm,
+                         out_stride=opts.output_stride, last_relu=opts.relu)
+    else:
+        head = nn.Conv2d(body.out_channels, head_channels, kernel_size=1)
 
     model = SegmentationModule(body, head, head_channels, cls)
 

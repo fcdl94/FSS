@@ -68,13 +68,17 @@ class VOCSegmentation(data.Dataset):
                                f' Download it with download_voc and then link it into {voc_root}.')
 
         if train:
-            self.class_to_images = pkl.load(open(splits_dir+'inverse_dict_train.pkl', 'rb'))
+            self.class_to_images_ = pkl.load(open(splits_dir+'inverse_dict_train.pkl', 'rb'))
         else:
-            self.class_to_images = None
+            self.class_to_images_ = None
 
         self.images = np.load(osp.join(splits_dir, split + '.npy'))
         self.images = [(osp.join(voc_root, "images", i + ".jpg"), osp.join(voc_root, "annotations", i + ".png"))
                        for i in self.images]
+
+    @property
+    def class_to_images(self):
+        return self.class_to_images_
 
     def __getitem__(self, index):
         """
@@ -98,4 +102,3 @@ class VOCFSSDataset(FSSDataset):
     def make_dataset(self, root, train):
         full_voc = VOCSegmentation(root, train, transform=None)
         return full_voc
-

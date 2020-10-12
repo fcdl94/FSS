@@ -5,16 +5,20 @@ port=$2
 alias exp="python -m torch.distributed.launch --master_port ${port} --nproc_per_node=1 run.py --opt_level O0"
 shopt -s expand_aliases
 
-lr=1e-4
-task=15-5
-path=checkpoints/step/15-5-voc
+ishot=$3
+lr=0.0001
+task=voc
+ds=coco
 
-gen_par="--task ${task} --batch_size 10 --lr ${lr} --crop_size 512"
-inc_par="--input_mix novel --val_interval 10 --ckpt_interval 10"
+path=checkpoints/step/voc-coco
 
-oname=SPN_ns
-for is in 0 1 2 3 4; do
-  for ns in 1 5 10; do
-    exp --method SPN --name SPN_notrain_ns --epochs 0 ${gen_par} ${inc_par} --step 1 --nshot ${ns} --ishot ${is} --step_ckpt ${path}/${oname}_0.pth
-  done
+gen_par="--task ${task} --dataset ${ds} --batch_size 10 --crop_size 512"
+inc_par="--ishot ${ishot} --input_mix novel --val_interval 25 --ckpt_interval 5"
+
+
+iter=10000
+lr=0.001
+oname=SPN
+for ns in 1 5 10; do
+  exp --method SPN --name SPN --iter ${iter} --lr ${lr} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/${oname}_0.pth
 done

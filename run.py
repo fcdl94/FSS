@@ -37,7 +37,10 @@ def get_step_ckpt(opts, logger, task_name, name):
     if opts.step_ckpt is not None:
         path = opts.step_ckpt
     else:
-        path = f"checkpoints/step/{task_name}/{name}_{opts.step - 1}.pth"
+        if opts.step-1 == 0:
+            path = f"checkpoints/step/{task_name}/{opts.name}_{opts.step - 1}.pth"
+        else:
+            path = f"checkpoints/step/{task_name}/{name}_{opts.step - 1}.pth"
 
     # generate model from path
     if os.path.exists(path):
@@ -109,8 +112,7 @@ def main(opts):
     random.seed(opts.random_seed)
 
     train_dst, val_dst = get_dataset(opts, task, train=True)
-    logger.info(f"Dataset: {opts.dataset}, Train set: {len(train_dst)}, Val set: {len(val_dst)},"
-                f"n_classes {opts.num_classes}")
+    logger.info(f"Dataset: {opts.dataset}, Train set: {len(train_dst)}, Val set: {len(val_dst)}")
 
     train_loader = data.DataLoader(train_dst, batch_size=min(opts.batch_size, len(train_dst)),
                                    sampler=DistributedSampler(train_dst, num_replicas=world_size, rank=rank),
@@ -120,6 +122,8 @@ def main(opts):
                                  num_workers=opts.num_workers)
 
     train_iterations = 1 if task.step == 0 else 20//task.nshot
+    if opts.iter is not None:
+        opts.epochs = opts.iter // (len(train_loader) * train_iterations)
     opts.max_iter = opts.epochs * len(train_loader) * train_iterations
     if opts.max_iter == 0:
         opts.max_iter = 1
@@ -140,12 +144,13 @@ def main(opts):
         # clean memory
         del step_ckpt
 
+    # xxx Model warm up
     logger.debug(model)
     if task.step > 0 and not opts.continue_ckpt and opts.ckpt is None:
+        logger.info("Warm up lap!")
         model.warm_up(train_dst)
 
     # xxx Handle checkpoint to resume training
-    best_score = 0.0
     cur_epoch = 0
     if opts.continue_ckpt:
         opts.ckpt = checkpoint_path
@@ -153,7 +158,6 @@ def main(opts):
         assert os.path.isfile(opts.ckpt), "Error, ckpt not found. Check the correct directory"
         checkpoint = torch.load(opts.ckpt, map_location="cpu")
         cur_epoch = checkpoint["epoch"] + 1
-        best_score = checkpoint['best_score']
         model.load_state_dict(checkpoint["model_state"])
         logger.info("[!] Model restored from %s" % opts.ckpt)
         del checkpoint
@@ -175,16 +179,6 @@ def main(opts):
     # check if random is equal here.
     logger.print(torch.randint(0, 100, (1, 1)))
 
-    # =====  Initial Validation  =====
-    # logger.info("Validation on initialization without training")
-    # val_loss, val_score, ret_samples = model.validate(loader=val_loader, metrics=val_metrics,
-    #                                                   ret_samples_ids=sample_ids)
-    #
-    # logger.print("Done validation")
-    # logger.info(f"End of Validation {cur_epoch}/{opts.epochs}, Validation Loss={val_loss[0] + val_loss[1]},"
-    #             f" Class Loss={val_loss[0]}, Reg Loss={val_loss[1]} ")
-    # log_val(logger, val_metrics, val_score, val_loss, ret_samples, denorm, label2color, cur_epoch)
-
     # train/val here
     while cur_epoch < opts.epochs and not opts.test:
         # =====  Train  =====
@@ -194,9 +188,11 @@ def main(opts):
                                  print_int=opts.print_interval, n_iter=train_iterations)
         end = time.time()
 
+        len_ep = int(end - start)
         logger.info(f"End of Epoch {cur_epoch}/{opts.epochs}, Average Loss={epoch_loss[0] + epoch_loss[1]},"
                     f" Class Loss={epoch_loss[0]}, Reg Loss={epoch_loss[1]} "
-                    f"-- time: {int(end-start)//60}:{int(end-start)%60}")
+                    f"-- time: {len_ep//60}:{len_ep%60}")
+        logger.info(f"I will finish in {len_ep*(opts.epochs-cur_epoch)//60} minutes")
         logger.add_scalar("E-Loss", epoch_loss[0] + epoch_loss[1], cur_epoch)
         logger.add_scalar("E-Loss-reg", epoch_loss[1], cur_epoch)
         logger.add_scalar("E-Loss-cls", epoch_loss[0], cur_epoch)
@@ -221,13 +217,14 @@ def main(opts):
 
         cur_epoch += 1
 
-    # keep the metric to print them at the end of training
-    # if val_score is not None:
-    #     results["V-IoU"] = val_score['Class IoU']
-    #     results["V-Acc"] = val_score['Class Acc']
+    if not opts.test:
+        # =====  Finalize Model  =====
+        logger.info("Cooling down...")
+        if rank == 0:
+            model.cool_down(train_dst)
 
     # =====  Save Model  =====
-    if rank == 0:  # save best model at the last iteration
+    if not opts.test and rank == 0:  # save best model at the last iteration
         score = val_score['Mean IoU'] if val_score is not None else 0.  # use last score we have
         if not opts.debug:
             save_ckpt(checkpoint_path, model, cur_epoch, score)
@@ -252,13 +249,14 @@ def main(opts):
     else:
         sample_ids = None
 
-    # load best model
-    if opts.test:
-        # Put the model on GPU
+    # Put the model on GPU  // Make it always, also after train, to remediate the cool_down method
+    if opts.test and opts.ckpt is not None:
+        checkpoint = torch.load(opts.ckpt, map_location="cpu")
+    else:
         checkpoint = torch.load(checkpoint_path, map_location="cpu")
-        model.load_state_dict(checkpoint["model_state"])
-        logger.info(f"*** Model restored from {checkpoint_path}")
-        del checkpoint
+    model.load_state_dict(checkpoint["model_state"])
+    logger.info(f"*** Model restored from {checkpoint_path}")
+    del checkpoint
 
     val_loss, val_score, ret_samples = model.validate(loader=test_loader_all, metrics=val_metrics,
                                                       ret_samples_ids=sample_ids)
@@ -283,18 +281,19 @@ def main(opts):
     task_log = opts.task + "-" + str(task.nshot) + str(task.ishot) if task.nshot != -1 else opts.task
     logger.log_results(task=task_log, name=opts.name, results=val_score['Class IoU'].values())
 
-    logger.info(f"*** Test the model on novel seen classes...")
-    val_loss, val_score, _ = model.validate(loader=test_loader_novel, metrics=val_metrics,
-                                            ret_samples_ids=None, novel=True)
-    logger.info(f"*** End of Test on novel, Total Loss={val_loss[0] + val_loss[1]},"
-                f" Class Loss={val_loss[0]}, Reg Loss={val_loss[1]}")
-    res_novel = {
-        "T-IoU": val_score['Class IoU'],
-        "T-Acc": val_score['Class Acc'],
-        "T-Prec": val_score['Class Prec'],
-    }
-    logger.add_results(res_novel, "Results_novel")
-    logger.log_results(task=task_log, name=opts.name, results=val_score['Class IoU'].values(), novel=True)
+    if opts.step > 0:
+        logger.info(f"*** Test the model on novel seen classes...")
+        val_loss, val_score, _ = model.validate(loader=test_loader_novel, metrics=val_metrics,
+                                                ret_samples_ids=None, novel=True)
+        logger.info(f"*** End of Test on novel, Total Loss={val_loss[0] + val_loss[1]},"
+                    f" Class Loss={val_loss[0]}, Reg Loss={val_loss[1]}")
+        res_novel = {
+            "T-IoU": val_score['Class IoU'],
+            "T-Acc": val_score['Class Acc'],
+            "T-Prec": val_score['Class Prec'],
+        }
+        logger.add_results(res_novel, "Results_novel")
+        logger.log_results(task=task_log, name=opts.name, results=val_score['Class IoU'].values(), novel=True)
 
     logger.close()
 

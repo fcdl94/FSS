@@ -13,9 +13,9 @@ class ResNeXt(nn.Module):
                  structure,
                  groups=64,
                  norm_act=nn.BatchNorm2d,
-                 input_3x3=False,
+                 input_3x3=True,
                  classes=0,
-                 dilation=1,
+                 output_stride=16,
                  base_channels=(128, 128, 256)):
         """Pre-activation (identity mapping) ResNeXt model
 
@@ -43,8 +43,13 @@ class ResNeXt(nn.Module):
 
         if len(structure) != 4:
             raise ValueError("Expected a structure with four values")
-        if dilation != 1 and len(dilation) != 4:
-            raise ValueError("If dilation is not 1 it must contain four values")
+
+        if output_stride == 16:
+            dilation = [1, 1, 1, 2]  # dilated conv for last 3 blocks (9 layers)
+        elif output_stride == 8:
+            dilation = [1, 1, 2, 4]  # 23+3 blocks (78 layers)
+        else:
+            raise NotImplementedError
 
         # Initial layers
         if input_3x3:
@@ -70,6 +75,7 @@ class ResNeXt(nn.Module):
             # Create blocks for module
             blocks = []
             for block_id in range(num):
+                # stride is 2 when dilation=1, mod_id>0, block_id=0, else is 1
                 s, d = self._stride_dilation(mod_id, block_id, dilation)
                 blocks.append((
                     "block%d" % (block_id + 1),

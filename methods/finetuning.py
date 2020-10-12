@@ -29,7 +29,7 @@ class FineTuning(Method):
         self.scheduler = get_scheduler(opts, self.optimizer)
         self.logger.debug("Optimizer:\n%s" % self.optimizer)
 
-        reduction = 'mean'
+        reduction = 'none'
         self.criterion = nn.CrossEntropyLoss(ignore_index=255, reduction=reduction)
 
 
@@ -48,7 +48,7 @@ class FineTuningClassifier(Method):
         self.scheduler = get_scheduler(opts, self.optimizer)
         self.logger.debug("Optimizer:\n%s" % self.optimizer)
 
-        reduction = 'mean'
+        reduction = 'none'
         self.criterion = nn.CrossEntropyLoss(ignore_index=255, reduction=reduction)
 
 
@@ -59,7 +59,7 @@ class AMP(FineTuning):
         super(AMP, self).initialize(opts)
         self.amp_alpha = opts.amp_alpha
 
-    def warm_up(self, dataset):
+    def warm_up(self, dataset, epochs=1):
         self.model.eval()
         classes = len(self.task.order)
         sum_features = torch.zeros(classes, self.model.module.head_channels).to(self.device)

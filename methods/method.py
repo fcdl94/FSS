@@ -2,6 +2,7 @@ import torch
 from torch import distributed
 from apex.parallel import DistributedDataParallel
 from apex import amp
+from utils.loss import HardNegativeMining
 
 
 class Method:
@@ -15,7 +16,10 @@ class Method:
         self.scheduler = None
         self.regularizer = None
         self.model_old = None
+        self.reduction = HardNegativeMining() if opts.hnm else lambda x:x.mean()
         self.novel_classes = self.task.get_n_classes()[-1]
+        self.step = task.step
+        self.opts = opts
 
         self.initialize(opts)  # setup the model, optimizer, scheduler and criterion
 
@@ -28,7 +32,10 @@ class Method:
     def initialize(self, opts):
         raise NotImplementedError
 
-    def warm_up(self, dataset):
+    def warm_up(self, dataset, epochs=1):
+        pass
+
+    def cool_down(self, dataset, epochs=1):
         pass
 
     def train(self, cur_epoch, train_loader, print_int=10, n_iter=1):
@@ -62,7 +69,7 @@ class Method:
                     rloss = self.regularizer(outputs, outputs_old)
 
                 # xxx Cross Entropy Loss
-                loss = criterion(outputs, labels)  # B x H x W
+                loss = self.reduction(criterion(outputs, labels) )  # B x H x W
 
                 loss_tot = loss + rloss
 
@@ -125,7 +132,7 @@ class Method:
                 if novel:
                     outputs[:, 1:-self.novel_classes] = -float("Inf")
 
-                loss = criterion(outputs, labels)
+                loss = criterion(outputs, labels).mean()
 
                 class_loss += loss.item()
 

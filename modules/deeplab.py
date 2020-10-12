@@ -12,6 +12,7 @@ class DeeplabV3(nn.Module):
                  hidden_channels=256,
                  out_stride=16,
                  norm_act=nn.BatchNorm2d,
+                 pooling=True,
                  pooling_size=None,
                  last_relu=False):
         super(DeeplabV3, self).__init__()
@@ -37,6 +38,7 @@ class DeeplabV3(nn.Module):
         self.global_pooling_bn = norm_act(hidden_channels)
         self.pool_red_conv = nn.Conv2d(hidden_channels, out_channels, 1, bias=False)
 
+        self.pooling = pooling
         self.last_relu = last_relu
         if last_relu:
             self.red_bn = norm_act(out_channels)
@@ -64,14 +66,15 @@ class DeeplabV3(nn.Module):
         out = self.red_conv(out)
 
         # Global pooling
-        pool = self._global_pooling(x)  # if training is global avg pooling 1x1, else use larger pool size
-        pool = self.global_pooling_conv(pool)
-        pool = self.global_pooling_bn(pool)
-        pool = self.pool_red_conv(pool)
-        if self.training or self.pooling_size is None:
-            pool = pool.repeat(1, 1, x.size(2), x.size(3))
+        if self.pooling:
+            pool = self._global_pooling(x)  # if training is global avg pooling 1x1, else use larger pool size
+            pool = self.global_pooling_conv(pool)
+            pool = self.global_pooling_bn(pool)
+            pool = self.pool_red_conv(pool)
+            if self.training or self.pooling_size is None:
+                pool = pool.repeat(1, 1, x.size(2), x.size(3))
+            out += pool
 
-        out += pool
         if self.last_relu:
             out = self.red_bn(out)
         return out
@@ -94,3 +97,42 @@ class DeeplabV3(nn.Module):
             pool = functional.avg_pool2d(x, pooling_size, stride=1)
             pool = functional.pad(pool, pad=padding, mode="replicate")
         return pool
+
+
+class DeeplabV2(nn.Module):
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 hidden_channels=256,
+                 out_stride=16,
+                 norm_act=nn.BatchNorm2d,
+                 pooling_size=None,
+                 last_relu=False):
+        super(DeeplabV2, self).__init__()
+        self.pooling_size = pooling_size
+
+        if out_stride == 16:
+            dilations = [1, 6, 12, 18]
+        elif out_stride == 8:
+            dilations = [6, 12, 18, 24]
+        else:
+            raise NotImplementedError
+
+        self.map_convs = nn.ModuleList([
+            nn.Conv2d(in_channels, hidden_channels, 3, bias=False, dilation=dilations[0], padding=dilations[0]),
+            nn.Conv2d(in_channels, hidden_channels, 3, bias=False, dilation=dilations[1], padding=dilations[1]),
+            nn.Conv2d(in_channels, hidden_channels, 3, bias=False, dilation=dilations[2], padding=dilations[2]),
+            nn.Conv2d(in_channels, hidden_channels, 3, bias=False, dilation=dilations[3], padding=dilations[3])
+        ])
+
+        self.last_relu = last_relu
+        if last_relu:
+            self.red_bn = norm_act(out_channels)
+
+    def forward(self, x):
+        # Map convolutions
+        out = sum([m(x) for m in self.map_convs])
+
+        if self.last_relu:
+            out = self.red_bn(out)
+        return out

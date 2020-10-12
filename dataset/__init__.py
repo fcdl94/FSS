@@ -1,4 +1,6 @@
 from .voc import VOCFSSDataset
+from .cityscapes import CityscapesFSSDataset
+from .coco import COCOFSS
 from .transform import Compose, RandomScale, RandomCrop, RandomHorizontalFlip, ToTensor, Normalize, CenterCrop, Resize
 import random
 from .utils import Subset
@@ -8,30 +10,57 @@ TRAIN_CV = 0.8
 def get_dataset(opts, task, train=True):
     """ Dataset And Augmentation
     """
-    train_transform = Compose([
-        RandomScale((0.5, 1.5)),
-        RandomCrop(opts.crop_size, pad_if_needed=True),
-        RandomHorizontalFlip(),
-        ToTensor(),
-        Normalize(mean=[0.485, 0.456, 0.406],
-                  std=[0.229, 0.224, 0.225]),
-    ])
-
-    val_transform = Compose([
-        Resize(size=opts.crop_size_test),
-        CenterCrop(size=opts.crop_size_test),
-        ToTensor(),
-        Normalize(mean=[0.485, 0.456, 0.406],
-                  std=[0.229, 0.224, 0.225]),
-    ])
-    test_transform = Compose([
-        ToTensor(),
-        Normalize(mean=[0.485, 0.456, 0.406],
-                  std=[0.229, 0.224, 0.225]),
-    ])
-
-    if opts.dataset == 'voc':
-        dataset = VOCFSSDataset
+    if opts.dataset == 'cts':
+        dataset = CityscapesFSSDataset
+        if not opts.full_res:
+            train_transform = transform.Compose([
+                transform.RandomScale((0.7, 2)),  # Using RRC should be (0.25, 0.75)
+                transform.RandomCrop(opts.crop_size),
+                transform.RandomHorizontalFlip(),
+                transform.ToTensor(),
+                transform.Normalize(mean=[0.485, 0.456, 0.406],
+                                    std=[0.229, 0.224, 0.225]),
+            ])
+        else:
+            train_transform = transform.Compose([
+                transform.RandomScale((0.7, 2)),
+                transform.ToTensor(),
+                transform.Normalize(mean=[0.485, 0.456, 0.406],
+                                    std=[0.229, 0.224, 0.225]),
+            ])
+        val_transform = transform.Compose([
+            transform.CenterCrop(size=opts.crop_size),
+            transform.ToTensor(),
+            transform.Normalize(mean=[0.485, 0.456, 0.406],
+                                std=[0.229, 0.224, 0.225]),
+        ])
+        test_transform = transform.Compose([
+            transform.ToTensor(),
+            transform.Normalize(mean=[0.485, 0.456, 0.406],
+                                std=[0.229, 0.224, 0.225]),
+        ])
+    elif opts.dataset == 'voc' or opts.dataset == 'coco':
+        dataset = VOCFSSDataset if opts.dataset == 'voc' else COCOFSS
+        train_transform = Compose([
+            RandomScale((0.5, 1.5)),
+            RandomCrop(opts.crop_size, pad_if_needed=True),
+            RandomHorizontalFlip(),
+            ToTensor(),
+            Normalize(mean=[0.485, 0.456, 0.406],
+                      std=[0.229, 0.224, 0.225]),
+        ])
+        val_transform = Compose([
+            Resize(size=opts.crop_size_test),
+            CenterCrop(size=opts.crop_size_test),
+            ToTensor(),
+            Normalize(mean=[0.485, 0.456, 0.406],
+                      std=[0.229, 0.224, 0.225]),
+        ])
+        test_transform = Compose([
+            ToTensor(),
+            Normalize(mean=[0.485, 0.456, 0.406],
+                      std=[0.229, 0.224, 0.225]),
+        ])
     else:
         raise NotImplementedError
 

@@ -3,11 +3,14 @@ import task
 
 
 def modify_command_options(opts):
-    if opts.dataset == 'voc':
-        opts.num_classes = 21
-
     if not opts.visualize:
         opts.sample_num = 0
+
+    if opts.backbone is None:
+        if opts.dataset == 'cts':
+            opts.backbone = 'resnext101'
+        else:
+            opts.backbone = 'resnet101'
 
     opts.no_cross_val = not opts.cross_val
     opts.pooling = round(opts.crop_size / opts.output_stride)
@@ -31,9 +34,7 @@ def get_argparser():
     parser.add_argument("--data_root", type=str, default="data",
                         help="path to Dataset")
     parser.add_argument("--dataset", type=str, default='voc',
-                        choices=['voc'], help='Name of dataset')
-    parser.add_argument("--num_classes", type=int, default=None,
-                        help="num classes (default: None)")
+                        choices=['voc', 'cts', 'coco'], help='Name of dataset')
 
     # Task Options
     parser.add_argument("--step", type=int, default=0,
@@ -50,6 +51,8 @@ def get_argparser():
     # Train Options
     parser.add_argument("--epochs", type=int, default=30,
                         help="epoch number (default: 30)")
+    parser.add_argument("--iter", type=int, default=None,
+                        help="iteration number (default: None)\n THIS OVERWRITE --EPOCHS!")
 
     parser.add_argument("--fix_bn", action='store_true', default=False,
                         help='fix batch normalization during training (default: False)')
@@ -57,6 +60,8 @@ def get_argparser():
                         help='batch size (default: 4)')
     parser.add_argument("--crop_size", type=int, default=512,
                         help="crop size (default: 512)")
+    parser.add_argument("--full_res", action='store_true', default=False,
+                        help='Use full resolution images in train (default: False)')
     parser.add_argument("--crop_size_test", type=int, default=None,
                         help="test crop size (default: = --crop_size)")
 
@@ -97,8 +102,10 @@ def get_argparser():
                         help="epoch interval for eval (default: 1)")
 
     # Segmentation Architecture Options
-    parser.add_argument("--backbone", type=str, default='resnet101',
-                        choices=['resnet50', 'resnet101'], help='backbone for the body (def: resnet50)')
+    parser.add_argument("--backbone", type=str, default=None,
+                        choices=['resnet50', 'resnet101', 'resnext101'], help='backbone for the body')
+    parser.add_argument("--deeplab", type=str, default="v3",
+                        choices=['v3', 'v2', 'none'], help='network head')
     parser.add_argument("--output_stride", type=int, default=16,
                         choices=[8, 16], help='stride for the backbone (def: 16)')
     parser.add_argument("--no_pretrained", action='store_true', default=False,
@@ -109,6 +116,10 @@ def get_argparser():
                         help="How to fuse the outputs. Options: 'mean', 'voting', 'max'")
     parser.add_argument("--relu", default=False, action='store_true',
                         help='Use this to enable last BN+ReLU on Deeplab-v3 (def. False)')
+    parser.add_argument("--no_pooling", default=False, action='store_true',
+                        help='Use this to DIS-enable Pooling in Deeplab-v3 (def. False)')
+    parser.add_argument("--hnm", default=False, action='store_true',
+                        help='Use this to enable Hard Negative Mining (def. False)')
 
     # Test and Checkpoint options
     parser.add_argument("--test",  action='store_true', default=False,
@@ -127,7 +138,7 @@ def get_argparser():
 
     # Method
     parser.add_argument("--method", type=str, default='FT',
-                        choices=['FT', 'SPN', 'COS', 'CFTC', 'WI', 'AMP', 'FTC', 'MIB', 'LWF', 'MIB-SPN', 'MIB-WI'],
+                        choices=['FT', 'SPN', 'COS', 'WI', 'AMP', 'DWI'],
                         help="The method you want to use.")
     parser.add_argument("--embedding", type=str, default="fastnvec", choices=['word2vec', 'fasttext', 'fastnvec'])
     parser.add_argument("--amp_alpha", type=float, default=1.,
