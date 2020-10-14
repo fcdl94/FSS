@@ -19,13 +19,12 @@ from methods import get_method
 import time
 
 
-def save_ckpt(path, model, epoch, best_score):
+def save_ckpt(path, model, epoch):
     """ save current model
     """
     state = {
         "epoch": epoch,
         "model_state": model.state_dict(),
-        "best_score": best_score,
     }
 
     torch.save(state, path)
@@ -209,11 +208,9 @@ def main(opts):
 
         # =====  Save Model  =====
         if rank == 0 and (cur_epoch + 1) % opts.ckpt_interval == 0:  # save best model at the last iteration
-            score = val_score['Mean IoU'] if val_score is not None else 0.  # use last score we have
             # best model to build incremental steps
-            if not opts.debug:
-                save_ckpt(checkpoint_path, model, cur_epoch, score)
-                logger.info("[!] Checkpoint saved.")
+            save_ckpt(checkpoint_path, model, cur_epoch)
+            logger.info("[!] Checkpoint saved.")
 
         cur_epoch += 1
 
@@ -225,10 +222,8 @@ def main(opts):
 
     # =====  Save Model  =====
     if not opts.test and rank == 0:  # save best model at the last iteration
-        score = val_score['Mean IoU'] if val_score is not None else 0.  # use last score we have
-        if not opts.debug:
-            save_ckpt(checkpoint_path, model, cur_epoch, score)
-            logger.info("[!] Checkpoint saved.")
+        save_ckpt(checkpoint_path, model, cur_epoch)
+        logger.info("[!] Checkpoint saved.")
 
     torch.distributed.barrier()
 

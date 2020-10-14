@@ -6,49 +6,53 @@ alias exp="python -m torch.distributed.launch --master_port ${port} --nproc_per_
 shopt -s expand_aliases
 
 ishot=$3
-lr=0.0001
-task=voc
-ds=coco
+task=15-5
+ds=voc
 
-path=checkpoints/step/voc-coco
+path=checkpoints/step/${task}-${ds}
 
 gen_par="--task ${task} --dataset ${ds} --batch_size 10 --crop_size 512"
 inc_par="--ishot ${ishot} --input_mix novel --val_interval 25 --ckpt_interval 5"
 
 lr=0.001
-iter=10000
+iter=1000
 #FT
-oname=FT
-for ns in 1 5 10; do
-  exp --method FT --name FT_lr${lr}_iter${iter} --iter ${iter} --lr ${lr} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/${oname}_0.pth
+oname=FT_ns
+for ns in 2; do
+  exp --method FT --name FT --iter ${iter} --lr ${lr} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/${oname}_0.pth
+done
+#SPN
+oname=SPN_ns
+for ns in 2; do
+  exp --method SPN --name SPN --iter ${iter} --lr ${lr} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/${oname}_0.pth
+done
+#COS
+oname=COS_ns
+for ns in 2; do
+  exp --method COS --name COS --iter ${iter} --lr ${lr} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/${oname}_0.pth
+done
+#WI-FT
+oname=COS_ns
+for ns in 2; do
+  exp --method WI --name WI-FT --iter ${iter} --lr ${lr} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/${oname}_0.pth
 done
 
 ##AMP
-#for ns in 1 5 10; do
-#  exp --method AMP --name AMP --iter 0 ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/${oname}_0.pth
-#done
+oname=FT_ns
+for ns in 2; do
+  exp --method AMP --name AMP --iter 0 ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/${oname}_0.pth
+done
 #AMP alpha 0.25
-#for ns in 1 5 10; do
-#  exp --method AMP --name AMP_alpha025 --iter 0 --amp_alpha 0.25 ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/${oname}_0.pth
-#done
-##SPN
-#oname=SPN
-#for ns in 1 5 10; do
-#  exp --method SPN --name SPN --iter ${iter} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/${oname}_0.pth
-#done
-#COS
-#oname=COS
-#for ns in 1 5 10; do
-#  exp --method COS --name COS --iter ${iter} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/${oname}_0.pth
-#done
+oname=FT_ns
+for ns in 2; do
+  exp --method AMP --name AMP_alpha025 --iter 0 --amp_alpha 0.25 ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/${oname}_0.pth
+done
 #WI
-#for ns in 1 5 10; do
-#  exp --method WI --name WI --iter 0 ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/${oname}_0.pth
-#done
-#WI-FT
-#for ns in 1 5 10; do
-#  exp --method WI --name WI-FT --iter ${iter} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/${oname}_0.pth
-#done
+oname=COS_ns
+for ns in 2; do
+  exp --method WI --name WI --iter 0 ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/${oname}_0.pth
+done
+
 
 #met=MIB-WI
 #oname=COS_ns

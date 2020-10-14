@@ -29,7 +29,7 @@ class IncrementalClassifier(nn.Module):
     def imprint_weights_step(self, features, step):
         self.cls[step].weight.data = features.view_as(self.cls[step].weight.data)
 
-    def imprint_weights_class(self, features, cl, alpha=0.99):
+    def imprint_weights_class(self, features, cl, alpha=1):
         step = 0
         while cl >= self.classes[step]:
             cl -= self.classes[step]
@@ -47,6 +47,10 @@ class CosineClassifier(nn.Module):
         self.cls = nn.ModuleList(
             [nn.Conv2d(channels, c, 1, bias=False) for c in classes])
         self.scaler = 10.
+        self.classes = classes
+        self.tot_classes = 0
+        for lcl in classes:
+            self.tot_classes += lcl
 
     def forward(self, x):
         x = F.normalize(x, p=2, dim=1)
@@ -58,14 +62,15 @@ class CosineClassifier(nn.Module):
     def imprint_weights_step(self, features, step):
         self.cls[step].weight.data = features.view_as(self.cls[step].weight.data)
 
-    def imprint_weights_class(self, features, cl, alpha=0.99):
+    def imprint_weights_class(self, features, cl, alpha=1):
         step = 0
-        while cl < self.classes[step]:
+        while cl >= self.classes[step]:
             cl -= self.classes[step]
-        if step == len(self.classes)-1:  # last step! alpha = 1
+            step += 1
+        if step == len(self.classes) - 1:  # last step! alpha = 1
             alpha = 0
-        self.cls[step].weight.data[cl] = alpha*self.cls[step].weight.data[cl] + \
-                                         (1-alpha)*features.view_as(self.cls[step].weight.data[cl])
+        self.cls[step].weight.data[cl] = alpha * self.cls[step].weight.data[cl] + \
+                                         (1 - alpha) * features.view_as(self.cls[step].weight.data[cl])
 
 
 class SPNetClassifier(nn.Module):

@@ -83,12 +83,22 @@ class FSSDataset(data.Dataset):
             self.dataset = Subset(self.full_data, idxs, transform=transform, target_transform=target_transform)
         else:
             dts_list = []
+            count = 0
             if 0 in idxs:
                 dts_list.append(Subset(self.full_data, idxs[0],
                                        transform=transform, target_transform=target_transform[0]))
+                for cl in self.labels_old:
+                    self.class_to_images[cl] = []
+                    for new_idx, idx in enumerate(idxs):
+                        if idx in self.full_data.class_to_images[cl]:
+                            self.class_to_images[cl].append(new_idx)
+                count += len(idxs[0])
             for i in range(1, len(self.labels)+1):
                 dts_list.append(Subset(self.full_data, idxs[i],
                                        transform=transform, target_transform=target_transform[i]))
+                self.class_to_images[self.labels[i-1]] = list(range(count, count+len(idxs[i])))
+                count += len(idxs[i])
+
             self.dataset = ConcatDataset(dts_list)
 
     def get_mapping_transform(self, labels, masking, masking_value):
@@ -123,16 +133,15 @@ class FSSDataset(data.Dataset):
         raise NotImplementedError
 
     def get_k_image_of_class(self, cl, k):
-        assert cl in self.inverted_order and cl != 0, "Class must be in the actual task!"
-        cl = self.inverted_order[cl]  # map to original mapping!
-        if not self.multi_idxs:
-            id_list = random.choices(self.class_to_images[cl], k=k)
-            ret_images = []
-            for i in id_list:
-                ret_images.append(self[i])
-            return ret_images
-        else:  # FSL step
-            raise NotImplementedError
+        assert cl < len(self.order) and cl != 0, f"Class must be in the actual task! Obtained {cl}"
+
+        cl = self.order[cl]  # map to original mapping!
+        assert len(self.class_to_images[cl]) >= k, f"There are no K images available for class {cl}."
+        id_list = random.choices(self.class_to_images[cl], k=k)
+        ret_images = []
+        for i in id_list:
+            ret_images.append(self[i])
+        return ret_images
 
 
 class LabelTransform:

@@ -2,8 +2,7 @@ from .method import Method
 from .imprinting import WeightImprinting
 import torch.nn as nn
 from .utils import get_scheduler
-from apex import amp
-from apex.parallel import DistributedDataParallel
+from torch.nn.parallel import DistributedDataParallel
 from .segmentation_module import make_model
 import torch
 from utils.loss import UnbiasedCrossEntropy, UnbiasedKnowledgeDistillationLoss, KnowledgeDistillationLoss
@@ -47,16 +46,14 @@ class LwF(Method):
         reduction = 'none'
         if self.task.step == 0:
             self.criterion = nn.CrossEntropyLoss(ignore_index=255, reduction=reduction)
-            self.model, self.optimizer = amp.initialize(self.model.to(self.device), self.optimizer,
-                                                        opt_level=opts.opt_level)
         else:
             self.criterion = self.get_criterion(task, reduction)
             self.regularizer = self.get_regularizer()
-            [self.model, self.model_old], optimizer = amp.initialize([self.model.to(device), self.model_old.to(device)],
-                                                                     self.optimizer, opt_level=opts.opt_level)
-            self.model_old = DistributedDataParallel(self.model_old, delay_allreduce=True)
+            self.model_old = self.model_old.to(device)
+            self.model_old = DistributedDataParallel(self.model_old)
         # Put the model on GPU
-        self.model = DistributedDataParallel(self.model, delay_allreduce=True)
+        self.model = self.model.to(device)
+        self.model = DistributedDataParallel(self.model)
 
     def get_classifier(self, opts, classes):
         return IncrementalClassifier(classes)
@@ -92,7 +89,7 @@ class MiB(LwF):
     def get_regularizer(self):
         return UnbiasedKnowledgeDistillationLoss()
 
-    def warm_up(self, dataset):
+    def warm_up(self, dataset, epochs=1):
         if self.task.use_bkg:
             cls = self.model.module.cls.cls
             imprinting_w = cls[0].weight[0]

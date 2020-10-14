@@ -8,12 +8,10 @@ import numpy as np
 from modules.classifier import CosineClassifier
 from torch.utils import data
 import random
-from apex import amp
 
 
 class CosineFT(Method):
     def initialize(self, opts):
-
         self.n_channels = 256
         self.model = make_model(opts, CosineClassifier(self.task.get_n_classes(), channels=self.n_channels))
 
@@ -135,12 +133,13 @@ class Prototypes(CosineFT):
 
 class DynamicWI(CosineFT):
     LR = 0.01
-    ITER = 100
-    BATCH_SIZE = 20
+    ITER = 500
+    BATCH_SIZE = 10
+    EPISODE = 5
 
     def __init__(self, task, device, logger, opts):
         super(DynamicWI, self).__init__(task, device, logger, opts)
-        self.weight = nn.Parameter(torch.ones(self.n_channels, device=self.device))
+        self.weight = nn.Parameter(F.normalize(torch.ones((self.n_channels, 1, 1), device=self.device), dim=0))
 
     def get_prototype(self, model, ds, cl, interpolate_label=True):
         protos = []
@@ -158,8 +157,11 @@ class DynamicWI(CosineFT):
                 lbl = lbl.flatten()  # Now it is (HxW)
                 if (lbl == cl).float().sum() > 0:
                     protos.append(self.norm_mean(out[lbl == cl, :]))
-        protos = torch.cat(protos, dim=0)
-        return protos.mean(dim=0)
+            if len(protos) > 0:
+                protos = torch.cat(protos, dim=0)
+                return protos.mean(dim=0)
+            else:
+                return None
 
     @staticmethod
     def norm_mean(x):
@@ -176,53 +178,102 @@ class DynamicWI(CosineFT):
             batch = next(it)
         return it, batch
 
+    def warm_up(self, dataset, epochs=1):
+        self.model.eval()
+        classes = self.task.get_n_classes()
+        old_classes = 0
+        for c in classes[:-1]:
+            old_classes += c
+        new_classes = np.arange(old_classes, old_classes + classes[-1])
+        for c in new_classes:
+            ds = dataset.get_k_image_of_class(cl=c, k=self.task.nshot)  # get K images of class c
+            wc = self.get_prototype(self.model, ds, c)
+            count = 0
+            while wc is None and count < 10:
+                ds = dataset.get_k_image_of_class(cl=c, k=self.task.nshot)  # get K images of class c
+                wc = self.get_prototype(self.model, ds, c)
+                count += 1
+            self.model.module.cls.imprint_weights_class(F.normalize(self.weight * wc.view(self.n_channels, 1, 1), dim=0), c)
+
     def cool_down(self, dataset, epochs=1):
-        model = self.model.module  # we should get the one without DDP
-        with self.model.no_sync():
-            if self.step == 0:
-                classes = self.task.get_novel_labels()
-                params = [{"params": filter(lambda p: p.requires_grad, model.cls.parameters())}, {"params": self.weight}]
-                optimizer = torch.optim.SGD(params, lr=DynamicWI.LR, momentum=0.9, nesterov=False)
-                # [model, self.weight], optimizer = amp.initialize([model.to(self.device), self.weight.to(self.device)],
-                #                                                 optimizer, opt_level=self.opts.opt_level)
-                criterion = nn.CrossEntropyLoss(ignore_index=255, reduction='mean')
+        if self.step == 0:
+            # instance a new model without DDP!
+            model = make_model(self.opts, CosineClassifier(self.task.get_n_classes(), channels=self.n_channels))
+            scaler = model.cls.scaler
+            state = {}
+            for k, v in self.model.state_dict().items():
+                state[k[7:]] = v
+            model.load_state_dict(state, strict=True)
+            model = model.to(self.device)
+            model.fix_bn()
+            model.eval()
+            # instance optimizer, criterion and data
+            classes = np.arange(0, self.task.get_n_classes()[0])
+            classes = classes[1:] if self.task.use_bkg else classes  # remove bkg if present
+            params = [# {"params": model.cls.cls[0].weight, "lr": DynamicWI.LR*0.1},
+                      {"params": self.weight, "lr": DynamicWI.LR}]
+            optimizer = torch.optim.SGD(params, lr=DynamicWI.LR)
+            criterion = nn.CrossEntropyLoss(ignore_index=255, reduction='mean')
 
-                dataloader = data.DataLoader(dataset, batch_size=min(DynamicWI.BATCH_SIZE, len(dataset)), shuffle=True,
-                                             num_workers=4, drop_last=True)
-                it = iter(dataloader)
+            dataloader = data.DataLoader(dataset, batch_size=min(DynamicWI.BATCH_SIZE, len(dataset)), shuffle=True,
+                                         num_workers=4, drop_last=True)
+            it = iter(dataloader)
+            loss_tot = 0.
+            # start train loop
+            for i in range(DynamicWI.ITER):
+                loss_step = 0.
+                optimizer.zero_grad()
 
-                classifier_weights = model.cls.cls[0].weight.data.clone()
-
-                for i in range(DynamicWI.ITER):
-                    model.cls.cls[0].weight.data = classifier_weights
-                    optimizer.zero_grad()
-                    N = random.randint(1, 5)
+                for e in range(DynamicWI.EPISODE):
+                    weight = torch.zeros_like(model.cls.cls[0].weight)
+                    N = 1
                     K = random.choice([1, 5, 10])
                     cls = random.choices(population=classes, k=N)  # sample N classes
-                    for c in cls:
-                        ds = dataset.get_k_image_of_class(cl=c, k=K)  # get K images of class c
-                        wc = self.get_prototype(model, ds, c)
-                        model.cls.cls[0].weight.data[c] = (self.weight * wc).view(1, self.n_channels, 1, 1)
+                    for c in range(self.task.get_n_classes()[0]):
+                        wc = None
+                        if c == cls[0]:
+                            ds = dataset.get_k_image_of_class(cl=c, k=K)  # get K images of class c
+                            wc = self.get_prototype(model, ds, c)
+                        if wc is None:
+                            weight[c] = F.normalize(model.cls.cls[0].weight[c], dim=0)
+                        else:
+                            weight[c] = F.normalize(self.weight * wc.view(self.n_channels, 1, 1), dim=0)
 
                     # get a batch of images from dataloader
                     it, batch = self.get_batch(it, dataloader)
-                    images = batch[0].to(self.device, dtype=torch.float32)
-                    labels = batch[1].to(self.device, dtype=torch.long)
+                    ds = dataset.get_k_image_of_class(cl=cls[0], k=DynamicWI.BATCH_SIZE)  # get K images of class c
+                    im_ds = [ds[i][0].unsqueeze(0) for i in range(len(ds))]
+                    lbl_ds = [ds[i][1].unsqueeze(0) for i in range(len(ds))]
+                    images = torch.cat([batch[0], *im_ds], dim=0).to(self.device, dtype=torch.float32)
+                    labels = torch.cat([batch[1], *lbl_ds], dim=0).to(self.device, dtype=torch.long)
 
-                    out = model(images)
+                    with torch.no_grad():
+                        out = model(images, use_classifier=False)
+                        out = F.normalize(out, dim=1)
+                    out = scaler * F.conv2d(out, weight)
+                    out_size = images.shape[-2:]
+                    out = F.interpolate(out, size=out_size, mode="bilinear", align_corners=False)
                     loss = criterion(out, labels)
                     loss.backward()
-                    #with amp.scale_loss(loss, optimizer) as scaled_loss:
-                    #    scaled_loss.backward()
-                    optimizer.step()
+                    loss_step += loss.item()
+                optimizer.step()
 
-                    if (i % 50) == 0:
-                        self.logger.info(f"Cool down loss at iter {i}: {loss.item()}")
+                self.logger.add_scalar("loss_cool_down", loss_step/DynamicWI.EPISODE, i+1)
+                loss_tot += loss_step/DynamicWI.EPISODE
+                if (i % 50) == 0:
+                    self.logger.info(f"Cool down loss at iter {i+1}: {loss_tot/(i+1)}")
+
+            self.logger.debug(self.weight)
+            state = {}
+            for k, v in model.state_dict().items():
+                state["module."+k] = v
+            self.model.load_state_dict(state)
 
     def load_state_dict(self, checkpoint, strict=True):
         super().load_state_dict(checkpoint, strict)
         if self.step > 0:
-            self.weight.data = checkpoint['weight']
+            device = self.weight.device
+            self.weight.data = checkpoint['weight'].to(device)
 
     def state_dict(self):
         state = {"model": self.model.state_dict(), "optimizer": self.optimizer.state_dict(),

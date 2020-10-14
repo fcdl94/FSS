@@ -1,7 +1,6 @@
 import torch
 from torch import distributed
-from apex.parallel import DistributedDataParallel
-from apex import amp
+from torch.nn.parallel import DistributedDataParallel
 from utils.loss import HardNegativeMining
 
 
@@ -16,7 +15,7 @@ class Method:
         self.scheduler = None
         self.regularizer = None
         self.model_old = None
-        self.reduction = HardNegativeMining() if opts.hnm else lambda x:x.mean()
+        self.reduction = HardNegativeMining() if opts.hnm else lambda x: x.mean()
         self.novel_classes = self.task.get_n_classes()[-1]
         self.step = task.step
         self.opts = opts
@@ -24,10 +23,9 @@ class Method:
         self.initialize(opts)  # setup the model, optimizer, scheduler and criterion
 
         if self.model is not None:
-            self.model, self.optimizer = amp.initialize(self.model.to(self.device), self.optimizer,
-                                                        opt_level=opts.opt_level)
             # Put the model on GPU
-            self.model = DistributedDataParallel(self.model, delay_allreduce=True)
+            self.model = self.model.to(device)
+            self.model = DistributedDataParallel(self.model)
 
     def initialize(self, opts):
         raise NotImplementedError
@@ -69,12 +67,10 @@ class Method:
                     rloss = self.regularizer(outputs, outputs_old)
 
                 # xxx Cross Entropy Loss
-                loss = self.reduction(criterion(outputs, labels) )  # B x H x W
+                loss = self.reduction(criterion(outputs, labels))  # B x H x W
 
                 loss_tot = loss + rloss
-
-                with amp.scale_loss(loss_tot, optim) as scaled_loss:
-                    scaled_loss.backward()
+                loss_tot.backward()
 
                 optim.step()
                 scheduler.step()
