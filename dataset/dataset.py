@@ -137,7 +137,7 @@ class FSSDataset(data.Dataset):
 
         cl = self.order[cl]  # map to original mapping!
         assert len(self.class_to_images[cl]) >= k, f"There are no K images available for class {cl}."
-        id_list = random.choices(self.class_to_images[cl], k=k)
+        id_list = random.sample(self.class_to_images[cl], k=k)
         ret_images = []
         for i in id_list:
             ret_images.append(self[i])

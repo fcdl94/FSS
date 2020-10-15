@@ -172,7 +172,6 @@ def main(opts):
                                std=[0.229, 0.224, 0.225])  # de-normalization for original images
 
     val_metrics = StreamSegMetrics(len(task.get_order()))
-    val_score = None
     results = {}
 
     # check if random is equal here.

@@ -8,6 +8,7 @@ import numpy as np
 from modules.classifier import CosineClassifier
 from torch.utils import data
 import random
+from .utils import get_batch, get_prototype
 
 
 class CosineFT(Method):
@@ -48,7 +49,7 @@ class CosineFTC(Method):
 
         # xxx Set up optimizer
         params = []
-        params.append({"params": filter(lambda p: p.requires_grad, self.model.cls[-1].parameters()),
+        params.append({"params": filter(lambda p: p.requires_grad, self.model.cls.cls[-1].parameters()),
                        'weight_decay': opts.weight_decay, 'lr': opts.lr * opts.lr_cls})
 
         self.optimizer = torch.optim.SGD(params, lr=opts.lr, momentum=0.9, nesterov=False)
@@ -141,43 +142,6 @@ class DynamicWI(CosineFT):
         super(DynamicWI, self).__init__(task, device, logger, opts)
         self.weight = nn.Parameter(F.normalize(torch.ones((self.n_channels, 1, 1), device=self.device), dim=0))
 
-    def get_prototype(self, model, ds, cl, interpolate_label=True):
-        protos = []
-        with torch.no_grad():
-            for img, lbl in ds:
-                img, lbl = img.to(self.device), lbl.to(self.device)
-                out = model(img.unsqueeze(0), use_classifier=False).detach()
-                if interpolate_label:  # to match output size
-                    lbl = F.interpolate(lbl.float().view(1, 1, lbl.shape[0], lbl.shape[1]),
-                                        size=out.shape[-2:], mode="nearest").view(out.shape[-2:]).type(torch.uint8)
-                else:  # interpolate output to match label size
-                    out = F.interpolate(out, size=img.shape[-2:], mode="bilinear", align_corners=False)
-                out = out.squeeze(0)
-                out = out.view(out.shape[0], -1).t()  # (HxW) x F
-                lbl = lbl.flatten()  # Now it is (HxW)
-                if (lbl == cl).float().sum() > 0:
-                    protos.append(self.norm_mean(out[lbl == cl, :]))
-            if len(protos) > 0:
-                protos = torch.cat(protos, dim=0)
-                return protos.mean(dim=0)
-            else:
-                return None
-
-    @staticmethod
-    def norm_mean(x):
-        # x should be N x F, return 1 x F
-        return F.normalize(x, dim=1).mean(dim=0, keepdim=True)
-
-    @staticmethod
-    def get_batch(it, dataloader):
-        try:
-            batch = next(it)
-        except StopIteration:
-            # restart the generator if the previous generator is exhausted.
-            it = iter(dataloader)
-            batch = next(it)
-        return it, batch
-
     def warm_up(self, dataset, epochs=1):
         self.model.eval()
         classes = self.task.get_n_classes()
@@ -187,11 +151,11 @@ class DynamicWI(CosineFT):
         new_classes = np.arange(old_classes, old_classes + classes[-1])
         for c in new_classes:
             ds = dataset.get_k_image_of_class(cl=c, k=self.task.nshot)  # get K images of class c
-            wc = self.get_prototype(self.model, ds, c)
+            wc = get_prototype(self.model, ds, c, self.device)
             count = 0
             while wc is None and count < 10:
                 ds = dataset.get_k_image_of_class(cl=c, k=self.task.nshot)  # get K images of class c
-                wc = self.get_prototype(self.model, ds, c)
+                wc = get_prototype(self.model, ds, c, self.device)
                 count += 1
             self.model.module.cls.imprint_weights_class(F.normalize(self.weight * wc.view(self.n_channels, 1, 1), dim=0), c)
 
@@ -210,7 +174,7 @@ class DynamicWI(CosineFT):
             # instance optimizer, criterion and data
             classes = np.arange(0, self.task.get_n_classes()[0])
             classes = classes[1:] if self.task.use_bkg else classes  # remove bkg if present
-            params = [# {"params": model.cls.cls[0].weight, "lr": DynamicWI.LR*0.1},
+            params = [  # {"params": model.cls.cls[0].weight, "lr": DynamicWI.LR*0.1},
                       {"params": self.weight, "lr": DynamicWI.LR}]
             optimizer = torch.optim.SGD(params, lr=DynamicWI.LR)
             criterion = nn.CrossEntropyLoss(ignore_index=255, reduction='mean')
@@ -226,22 +190,21 @@ class DynamicWI(CosineFT):
 
                 for e in range(DynamicWI.EPISODE):
                     weight = torch.zeros_like(model.cls.cls[0].weight)
-                    N = 1
                     K = random.choice([1, 5, 10])
-                    cls = random.choices(population=classes, k=N)  # sample N classes
+                    cls = random.choice(classes)  # sample N classes
                     for c in range(self.task.get_n_classes()[0]):
                         wc = None
-                        if c == cls[0]:
+                        if c == cls:
                             ds = dataset.get_k_image_of_class(cl=c, k=K)  # get K images of class c
-                            wc = self.get_prototype(model, ds, c)
+                            wc = get_prototype(self.model, ds, c, self.device)
                         if wc is None:
                             weight[c] = F.normalize(model.cls.cls[0].weight[c], dim=0)
                         else:
                             weight[c] = F.normalize(self.weight * wc.view(self.n_channels, 1, 1), dim=0)
 
                     # get a batch of images from dataloader
-                    it, batch = self.get_batch(it, dataloader)
-                    ds = dataset.get_k_image_of_class(cl=cls[0], k=DynamicWI.BATCH_SIZE)  # get K images of class c
+                    it, batch = get_batch(it, dataloader)
+                    ds = dataset.get_k_image_of_class(cl=cls, k=DynamicWI.BATCH_SIZE)  # get K images of class c
                     im_ds = [ds[i][0].unsqueeze(0) for i in range(len(ds))]
                     lbl_ds = [ds[i][1].unsqueeze(0) for i in range(len(ds))]
                     images = torch.cat([batch[0], *im_ds], dim=0).to(self.device, dtype=torch.float32)
@@ -279,3 +242,125 @@ class DynamicWI(CosineFT):
         state = {"model": self.model.state_dict(), "optimizer": self.optimizer.state_dict(),
                  "scheduler": self.scheduler.state_dict(), "weight": self.weight.data}
         return state
+
+
+class WeightRegression(CosineFT):
+
+    def __init__(self, task, device, logger, opts):
+        super().__init__(task, device, logger, opts)
+        self.weight = nn.Sequential(
+            nn.Linear(self.n_channels, self.n_channels),
+            nn.ReLU(),
+            nn.Linear(self.n_channels, self.n_channels)
+        ).to(device=self.device)
+        self.LR = 0.001
+        self.ITER = 1000
+        self.BATCH_SIZE = 10
+        self.class_batch = 5
+
+    def warm_up(self, dataset, epochs=1):
+        self.model.eval()
+        classes = self.task.get_n_classes()
+        old_classes = 0
+        for c in classes[:-1]:
+            old_classes += c
+        new_classes = list(range(old_classes, old_classes + classes[-1]))
+        for c in new_classes:
+            ds = dataset.get_k_image_of_class(cl=c, k=self.task.nshot)  # get K images of class c
+            wc = get_prototype(self.model, ds, c, self.device)
+            count = 0
+            while wc is None and count < 10:
+                ds = dataset.get_k_image_of_class(cl=c, k=self.task.nshot)  # get K images of class c
+                wc = get_prototype(self.model, ds, c, self.device)
+                count += 1
+            assert wc is not None, f"Error, prototype for class {c} cannot be done"
+            self.model.module.cls.imprint_weights_class(self.weight(wc).view(self.n_channels, 1, 1), c)
+
+    def cool_down(self, dataset, epochs=1):
+        if self.step == 0:
+            self.model.eval()
+            mod = self.model.module.cls.cls[0]
+            # instance optimizer, criterion and data
+            classes = list(range(0, self.task.get_n_classes()[0]))
+            classes = classes[1:] if self.task.use_bkg else classes  # remove bkg if present
+            optimizer = torch.optim.SGD(self.weight.parameters(), lr=self.LR)
+            criterion = nn.MSELoss(reduction="sum")
+
+            loss_tot = 0.
+            # start train loop
+            for i in range(self.ITER):
+                optimizer.zero_grad()
+                wcs = []
+                tar = []
+                N = self.class_batch
+                K = random.choice([1, 5, 10])
+                cls = random.sample(population=classes, k=N)  # sample N classes
+                for c in cls:
+                    ds = dataset.get_k_image_of_class(cl=c, k=K)  # get K images of class c
+                    count = 0
+                    wc = get_prototype(self.model, ds, c, self.device)
+                    while wc is None and count < 10:
+                        ds = dataset.get_k_image_of_class(cl=c, k=K)  # get K images of class c
+                        wc = get_prototype(self.model, ds, c, self.device)
+                        count += 1
+                    if wc is not None:
+                        wcs.append(wc.view(1, -1))
+                        tar.append(mod.weight[c].detach().view(1, -1))
+                wc = torch.cat(wcs, dim=0)
+                tar = torch.cat(tar, dim=0)
+
+                out_weight = self.weight(wc)
+                loss = criterion(out_weight, tar)
+                loss.backward()
+                optimizer.step()
+
+                self.logger.add_scalar("loss_cool_down", loss.item(), i+1)
+                loss_tot += loss.item()
+                if ((i+1) % 50) == 0:
+                    self.logger.info(f"Cool down loss at iter {i+1}: {loss_tot/50}")
+                    loss_tot = 0
+
+            self.logger.debug(self.weight)
+
+    def load_state_dict(self, checkpoint, strict=True):
+        super().load_state_dict(checkpoint, strict)
+        if self.step > 0:
+            self.weight.load_state_dict(checkpoint['weight'])
+
+    def state_dict(self):
+        state = {"model": self.model.state_dict(), "optimizer": self.optimizer.state_dict(),
+                 "scheduler": self.scheduler.state_dict(), "weight": self.weight.state_dict()}
+        return state
+
+
+class WeightMixing(CosineFT):
+
+    def warm_up(self, dataset, epochs=1):
+        self.model.eval()
+        classes = self.task.get_n_classes()
+        old_classes = 0
+        for c in classes[:-1]:
+            old_classes += c
+        new_classes = list(range(old_classes, old_classes + classes[-1]))
+        for c in new_classes:
+            ds = dataset.get_k_image_of_class(cl=c, k=self.task.nshot)  # get K images of class c
+            im_ds = [ds[i][0].unsqueeze(0) for i in range(len(ds))]
+            lbl_ds = [ds[i][1].unsqueeze(0) for i in range(len(ds))]
+            images = torch.cat(im_ds, dim=0).to(self.device, dtype=torch.float32)
+            labels = torch.cat(lbl_ds, dim=0).to(self.device, dtype=torch.long)
+            with torch.no_grad():
+                out = self.model(images)
+                oi_acc = torch.zeros(classes[0]).to(self.device)
+                count = 0
+                for i in range(len(out)):
+                    if (labels[i] == c).sum() == 0:
+                        continue
+                    oi = out[i][:, labels[i] == c]  # get scores for pixels of c only -> oi has size C x P_c
+                    oi = oi[:classes[0]].softmax(dim=0)  # make softmax on base classes -> C_base x P_c
+                    oi_acc += oi.mean(dim=1)
+                    count += 1
+                old_class_score = oi_acc / count  # now we have mean over all images
+                new_weight = torch.zeros(self.n_channels).to(self.device)
+                for oc in range(classes[0]):  # for each old class oc
+                    new_weight += self.model.module.cls.cls[0].weight[oc].view(-1) * old_class_score[oc]
+                self.model.module.cls.imprint_weights_class(new_weight.view(self.n_channels, 1, 1), c)

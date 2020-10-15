@@ -81,6 +81,17 @@ class LwF(Method):
         return state
 
 
+class LwF_Cosine(LwF):
+    def get_classifier(self, opts, classes):
+        self.n_channels = 256
+        return CosineClassifier(classes, channels=self.n_channels)
+
+
+class LwF_WI(LwF_Cosine, WeightImprinting):
+    # Being just the combination of WI (that defines warm_up) and LwF, it doesn't need any code!
+    pass
+
+
 class MiB(LwF):
     def get_criterion(self, task, reduction):
         return UnbiasedCrossEntropy(ignore_index=255, reduction=reduction,
@@ -103,18 +114,3 @@ class MiB(LwF):
             cls[-1].bias.data.copy_(new_bias)
 
             cls[0].bias[0].data.copy_(new_bias.squeeze(0))
-
-
-class MiB_WI(LwF, WeightImprinting):
-    def get_criterion(self, task, reduction):
-        return UnbiasedCrossEntropy(ignore_index=255, reduction=reduction,
-                                    old_cl=len(task.get_order()) - len(task.get_novel_labels()))
-
-    def get_regularizer(self):
-        return UnbiasedKnowledgeDistillationLoss()
-
-    def get_classifier(self, opts, classes):
-        return CosineClassifier(classes, channels=256)
-
-    def initialize(self, opts):
-        pass

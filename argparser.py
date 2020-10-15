@@ -1,5 +1,6 @@
 import argparse
 import task
+from methods import methods
 
 
 def modify_command_options(opts):
@@ -138,10 +139,10 @@ def get_argparser():
 
     # Method
     parser.add_argument("--method", type=str, default='FT',
-                        choices=['FT', 'SPN', 'COS', 'WI', 'AMP', 'DWI'],
+                        choices=methods,
                         help="The method you want to use.")
     parser.add_argument("--embedding", type=str, default="fastnvec", choices=['word2vec', 'fasttext', 'fastnvec'])
-    parser.add_argument("--amp_alpha", type=float, default=1.,
+    parser.add_argument("--amp_alpha", type=float, default=0.25,
                         help='Alpha value for the proxy adaptation.')
 
     return parser

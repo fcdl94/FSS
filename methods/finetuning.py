@@ -9,7 +9,8 @@ import torch.nn.functional as F
 
 class FineTuning(Method):
     def initialize(self, opts):
-        self.model = make_model(opts, IncrementalClassifier(self.task.get_n_classes(), channels=256))
+        self.n_channels = 256
+        self.model = make_model(opts, IncrementalClassifier(self.task.get_n_classes(), channels=self.n_channels))
 
         if opts.fix_bn:
             self.model.fix_bn()
@@ -35,7 +36,8 @@ class FineTuning(Method):
 
 class FineTuningClassifier(Method):
     def initialize(self, opts):
-        self.model = make_model(opts, IncrementalClassifier(self.task.get_n_classes(), channels=256))
+        self.n_channels = 256
+        self.model = make_model(opts, IncrementalClassifier(self.task.get_n_classes(), channels=self.n_channels))
 
         if opts.fix_bn:
             self.model.fix_bn()

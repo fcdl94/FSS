@@ -19,6 +19,7 @@ class Method:
         self.novel_classes = self.task.get_n_classes()[-1]
         self.step = task.step
         self.opts = opts
+        self.n_channels = -1
 
         self.initialize(opts)  # setup the model, optimizer, scheduler and criterion
 
