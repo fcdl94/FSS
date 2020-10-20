@@ -93,3 +93,8 @@ class SegmentationModule(nn.Module):
                 m.eval()
                 m.weight.requires_grad = False
                 m.bias.requires_grad = False
+
+    def bn_eval(self):
+        for m in self.modules():
+            if isinstance(m, nn.BatchNorm2d) or isinstance(m, inplace_abn.ABN):
+                m.eval()

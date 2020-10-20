@@ -1,15 +1,22 @@
 from .segmentation_module import make_model
-from .finetuning import FineTuning, FineTuningClassifier, AMP
-from .SPNet import SPNet, SPNet_LwF, SPNet_MiB
-from .imprinting import CosineFT, CosineFTC, WeightImprinting, WIC, DynamicWI, WeightRegression, WeightMixing
-from .ilmethods import MiB, LwF, LwF_WI, LwF_Cosine
+from .trainer import Trainer
+from .imprinting import *
 
-methods = {"FT": FineTuning, "SPN": SPNet, "COS": CosineFT, "CC": CosineFTC, "WI": WeightImprinting, "WIC": WIC,
-           "AMP": AMP, "DWI": DynamicWI, "WR": WeightRegression, "WM": WeightMixing,
-           "LWF": LwF, "LC": LwF_Cosine, "LW": LwF_WI, "LS": SPNet_LwF}
+methods = {"FT", "SPN", "COS", "WI", 'DWI', 'WM', "AMP"}
 
 
 def get_method(opts, task, device, logger):
-    if opts.method not in methods:
-        raise NotImplementedError
-    return methods[opts.method](task=task, device=device, logger=logger, opts=opts)
+    if opts.method == 'WI':
+        opts.method = 'COS'
+        return WeightImprinting(task=task, device=device, logger=logger, opts=opts)
+    elif opts.method == 'DWI':
+        opts.method = 'COS'
+        return DynamicWI(task=task, device=device, logger=logger, opts=opts)
+    elif opts.method == 'WM':
+        opts.method = 'COS'
+        return WeightMixing(task=task, device=device, logger=logger, opts=opts)
+    elif opts.method == 'AMP':
+        opts.method = 'FT'
+        return AMP(task=task, device=device, logger=logger, opts=opts)
+    else:
+        return Trainer(task=task, device=device, logger=logger, opts=opts)

@@ -1,26 +1,66 @@
 import torch
 from torch import distributed
+import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel
-from utils.loss import HardNegativeMining
+from utils.loss import HardNegativeMining, FocalLoss, KnowledgeDistillationLoss
+from .segmentation_module import make_model
+from modules.classifier import IncrementalClassifier, CosineClassifier, SPNetClassifier
+from .utils import get_scheduler
 
 
-class Method:
+class Trainer:
     def __init__(self, task, device, logger, opts):
         self.logger = logger
         self.device = device
         self.task = task
-        self.model = None
-        self.criterion = None
-        self.optimizer = None
-        self.scheduler = None
-        self.regularizer = None
-        self.reg_weight = 0.
-        self.model_old = None
-        self.reduction = HardNegativeMining() if opts.hnm else lambda x: x.mean()
+        self.opts = opts
         self.novel_classes = self.task.get_n_classes()[-1]
         self.step = task.step
-        self.opts = opts
-        self.n_channels = -1
+        self.need_model_old = task.step > 0 and (opts.loss_kd > 0)
+
+        self.n_channels = -1  # features size, will be initialized in make model
+        self.model = self.make_model()
+        self.model_old = None
+        if self.need_model_old:
+            self.model_old = self.make_model(is_old=True)
+            # put the old model into distributed memory and freeze it
+            for par in self.model_old.parameters():
+                par.requires_grad = False
+            self.model_old.to(device)
+            self.model_old.eval()
+
+        if opts.fix_bn:
+            self.model.fix_bn()
+
+        # xxx Set up optimizer
+        params = []
+        if not opts.train_only_classifier:
+            params.append({"params": filter(lambda p: p.requires_grad, self.model.body.parameters())})
+
+            params.append({"params": filter(lambda p: p.requires_grad, self.model.head.parameters()),
+                           'lr': opts.lr * opts.lr_head})
+
+        if opts.train_only_novel:
+            params.append({"params": filter(lambda p: p.requires_grad, self.model.cls[task.step].parameters()),
+                           'lr': opts.lr * opts.lr_cls})
+        else:
+            params.append({"params": filter(lambda p: p.requires_grad, self.model.cls.parameters()),
+                           'lr': opts.lr * opts.lr_cls})
+
+        self.optimizer = torch.optim.SGD(params, lr=opts.lr, momentum=0.9, weight_decay=opts.weight_decay)
+        self.scheduler = get_scheduler(opts, self.optimizer)
+        self.logger.debug("Optimizer:\n%s" % self.optimizer)
+
+        reduction = 'none'
+        if opts.focal:
+            self.criterion = FocalLoss(ignore_index=255, reduction=reduction)
+        else:
+            self.criterion = nn.CrossEntropyLoss(ignore_index=255, reduction=reduction)
+
+        self.reduction = HardNegativeMining() if opts.hnm else lambda x: x.mean()
+
+        self.kd_crit = KnowledgeDistillationLoss(reduction="mean") if task.step > 0 and opts.loss_kd > 0 else None
+        self.kd_weight = opts.loss_kd
 
         self.initialize(opts)  # setup the model, optimizer, scheduler and criterion
 
@@ -29,8 +69,30 @@ class Method:
             self.model = self.model.to(device)
             self.model = DistributedDataParallel(self.model)
 
+    def make_model(self, is_old=False):
+        classifier, self.n_channels = self.get_classifier(is_old)
+        model = make_model(self.opts, classifier)
+        return model
+
+    def get_classifier(self, is_old=False):
+        # here distinguish methods!
+        opts = self.opts
+        if opts.method == "SPN":
+            classes = self.task.get_old_labels() if is_old else self.task.get_order()
+            cls = SPNetClassifier(opts, classes)
+            n_feat = cls.channels
+        elif opts.method == 'COS':
+            n_feat = self.opts.n_feat
+            n_classes = self.task.get_n_classes()[:-1] if is_old else self.task.get_n_classes()
+            cls = CosineClassifier(n_classes, channels=n_feat)
+        else:
+            n_feat = self.opts.n_feat
+            n_classes = self.task.get_n_classes()[:-1] if is_old else self.task.get_n_classes()
+            cls = IncrementalClassifier(n_classes, channels=n_feat)
+        return cls, n_feat
+
     def initialize(self, opts):
-        raise NotImplementedError
+        pass
 
     def warm_up(self, dataset, epochs=1):
         pass
@@ -64,14 +126,19 @@ class Method:
 
                 optim.zero_grad()
                 outputs = model(images)
-                if self.model_old is not None:
-                    outputs_old = self.model_old(images)
-                    rloss = self.regularizer(outputs, outputs_old)
 
                 # xxx Cross Entropy Loss
                 loss = self.reduction(criterion(outputs, labels))  # B x H x W
 
-                loss_tot = loss + self.reg_weight * rloss
+                # xxx Distillation/Regularization Losses
+                if self.model_old is not None:
+                    rloss = torch.tensor([0.]).to(self.device)
+                    outputs_old = self.model_old(images)
+                    if self.kd_crit is not None:
+                        kd_loss = self.kd_weight * self.kd_crit(outputs, outputs_old)
+                        rloss += kd_loss
+
+                loss_tot = loss + rloss
                 loss_tot.backward()
 
                 optim.step()
@@ -148,23 +215,30 @@ class Method:
             score = metrics.get_results()
 
             class_loss = torch.tensor(class_loss).to(self.device)
-            reg_loss = torch.tensor([0.]).to(self.device)
 
             torch.distributed.reduce(class_loss, dst=0)
-            torch.distributed.reduce(reg_loss, dst=0)
 
             if distributed.get_rank() == 0:
                 class_loss = class_loss / distributed.get_world_size() / len(loader)
-                reg_loss = reg_loss / distributed.get_world_size() / len(loader)
 
             if logger is not None:
-                logger.info(f"Validation, Class Loss={class_loss}, Reg Loss={reg_loss} (without scaling)")
+                logger.info(f"Validation, Class Loss={class_loss}")
 
-        return (class_loss, reg_loss), score, ret_samples
+        return class_loss, score, ret_samples
 
     def load_state_dict(self, checkpoint, strict=True):
+        if self.need_model_old and not strict:
+            state = {}
+            for k, v in checkpoint["model"].items():
+                state[k[7:]] = v
+            self.model_old.load_state_dict(state, strict=True)  # we are loading the old model
+
+        if 'module.cls.class_emb' in checkpoint['model']:
+            # remove from checkpoint since SPNClassifier is not incremental
+            del checkpoint["model"]['module.cls.class_emb']
+
         self.model.load_state_dict(checkpoint["model"], strict=strict)
-        if strict:
+        if strict:  # if strict, we are in ckpt (not step) so load also optim and scheduler
             self.optimizer.load_state_dict(checkpoint["optimizer"])
             self.scheduler.load_state_dict(checkpoint["scheduler"])
 

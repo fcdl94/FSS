@@ -12,56 +12,16 @@ ds=voc
 path=checkpoints/step/${task}-${ds}
 
 gen_par="--task ${task} --dataset ${ds} --batch_size 10 --crop_size 512"
-inc_par="--ishot ${ishot} --input_mix novel --val_interval 25 --ckpt_interval 5"
+inc_par="--ishot ${ishot} --input_mix novel --val_interval 1000 --ckpt_interval 5"
 
 lr=0.001
-iter=1000
+iter=20
 #FT
-oname=FT_ns
-for ns in 2; do
-  exp --method FT --name FT --iter ${iter} --lr ${lr} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/${oname}_0.pth
+for ns in 1; do
+  exp --method FT  --name FT_new_kd  --loss_kd 10  --iter ${iter} --lr ${lr} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/FT_ns_0.pth
+  exp --method SPN --name SPN_new_kd --loss_kd 10  --iter ${iter} --lr ${lr} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/SPN_ns_0.pth
+  exp --method COS --name COS_new_kd  --loss_kd 10 --iter ${iter} --lr ${lr} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/COS_ns_0.pth
+#  exp --method WI  --name WI-FT_new --iter ${iter} --lr ${lr} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/COS_ns_0.pth
+#  exp --method AMP --name AMP_025_new --iter 0 --amp_alpha 0.25 ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/FT_ns_0.pth
+#  exp --method WI  --name WI_new   --iter 0 --lr ${lr} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/COS_ns_0.pth
 done
-#SPN
-oname=SPN_ns
-for ns in 2; do
-  exp --method SPN --name SPN --iter ${iter} --lr ${lr} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/${oname}_0.pth
-done
-#COS
-oname=COS_ns
-for ns in 2; do
-  exp --method COS --name COS --iter ${iter} --lr ${lr} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/${oname}_0.pth
-done
-#WI-FT
-oname=COS_ns
-for ns in 2; do
-  exp --method WI --name WI-FT --iter ${iter} --lr ${lr} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/${oname}_0.pth
-done
-
-##AMP
-oname=FT_ns
-for ns in 2; do
-  exp --method AMP --name AMP --iter 0 ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/${oname}_0.pth
-done
-#AMP alpha 0.25
-oname=FT_ns
-for ns in 2; do
-  exp --method AMP --name AMP_alpha025 --iter 0 --amp_alpha 0.25 ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/${oname}_0.pth
-done
-#WI
-oname=COS_ns
-for ns in 2; do
-  exp --method WI --name WI --iter 0 ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/${oname}_0.pth
-done
-
-
-#met=MIB-WI
-#oname=COS_ns
-#name=${met}ft_ns
-#gen_par="--task ${task} --no_mask --fix_bn --batch_size 10 --lr ${lr} --weight_decay 5e-4 --crop_size 512 --crop_size_test 512"
-#inc_par="--ishot ${ishot} --input_mix novel --iter ${iter} --val_interval 50 --ckpt_interval 10"
-#for ns in 1 5 10; do
-#  exp --method ${met} --name ${name} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${ckpt}
-##  for s in 2 3 4 5; do
-##   exp --method ${met} --name ${name} ${gen_par} ${inc_par} --step $s --nshot ${ns}
-##  done
-#done

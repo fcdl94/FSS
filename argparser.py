@@ -96,7 +96,7 @@ def get_argparser():
                         help="path to Log directory (default: ./logs)")
     parser.add_argument("--name", type=str, default='Experiment',
                         help="name of the experiment - to append to log directory (default: Experiment)")
-    parser.add_argument("--sample_num", type=int, default=4,
+    parser.add_argument("--sample_num", type=int, default=0,
                         help='number of samples for visualization (default: 0)')
     parser.add_argument("--debug",  action='store_true', default=False,
                         help="verbose option")
@@ -118,8 +118,9 @@ def get_argparser():
                         help='Wheather to use pretrained or not (def: True)')
     parser.add_argument("--norm_act", type=str, default="iabn_sync",
                         choices=['iabn_sync', 'iabn', 'abn', 'std'], help='Which BN to use (def: abn_sync')
-    parser.add_argument("--fusion-mode", metavar="NAME", type=str, choices=["mean", "voting", "max"], default="mean",
-                        help="How to fuse the outputs. Options: 'mean', 'voting', 'max'")
+
+    parser.add_argument("--n_feat", type=int, default=256,
+                        help="Feature size (default: 256)")
     parser.add_argument("--relu", default=False, action='store_true',
                         help='Use this to enable last BN+ReLU on Deeplab-v3 (def. False)')
     parser.add_argument("--no_pooling", default=False, action='store_true',
@@ -139,19 +140,22 @@ def get_argparser():
     parser.add_argument("--ckpt_interval", type=int, default=1,
                         help="epoch interval for saving model (default: 1)")
     parser.add_argument("--cross_val", action='store_true', default=False,
-                        help="If validate on training or on validation (default: Train)")
+                        help="If validate on training or on validation (default: Val)")
 
     parser.add_argument("--step_ckpt", default=None, type=str,
                         help="path to trained model at previous step. Leave it None if you want to use def path")
 
     # Method
     parser.add_argument("--method", type=str, default='FT',
-                        choices=methods,
-                        help="The method you want to use.")
+                        choices=methods, help="The method you want to use.")
     parser.add_argument("--embedding", type=str, default="fastnvec", choices=['word2vec', 'fasttext', 'fastnvec'])
     parser.add_argument("--amp_alpha", type=float, default=0.25,
                         help='Alpha value for the proxy adaptation.')
-    parser.add_argument("--loss_kd", default=1., type=float,
-                        help='The distillation loss strenght (Def 1.0)')
+    parser.add_argument("--loss_kd", default=0, type=float,
+                        help='The distillation loss strenght (Def 0.)')
+    parser.add_argument("--train_only_classifier", action='store_true', default=False,
+                        help="Freeze body and head of network (default: False)")
+    parser.add_argument("--train_only_novel", action='store_true', default=False,
+                        help="Train only the classifier of current step (default: False)")
 
     return parser

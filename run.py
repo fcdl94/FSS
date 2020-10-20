@@ -59,9 +59,7 @@ def log_val(logger, val_metrics, val_score, val_loss, cur_epoch):
     logger.info(val_metrics.to_str(val_score))
 
     # visualize validation score and samples
-    logger.add_scalar("V-Loss", val_loss[0] + val_loss[1], cur_epoch)
-    logger.add_scalar("V-Loss-reg", val_loss[1], cur_epoch)
-    logger.add_scalar("V-Loss-cls", val_loss[0], cur_epoch)
+    logger.add_scalar("V-Loss", val_loss, cur_epoch)
     logger.add_scalar("Val_Overall_Acc", val_score['Overall Acc'], cur_epoch)
     logger.add_scalar("Val_MeanIoU", val_score['Mean IoU'], cur_epoch)
     logger.add_table("Val_Class_IoU", val_score['Class IoU'], cur_epoch)
@@ -201,8 +199,7 @@ def main(opts):
             val_loss, val_score, _ = model.validate(loader=val_loader, metrics=val_metrics, ret_samples_ids=None)
 
             logger.print("Done validation")
-            logger.info(f"End of Validation {cur_epoch}/{opts.epochs}, Validation Loss={val_loss[0] + val_loss[1]},"
-                        f" Class Loss={val_loss[0]}, Reg Loss={val_loss[1]} ")
+            logger.info(f"End of Validation {cur_epoch}/{opts.epochs}, Validation Loss={val_loss}")
             log_val(logger, val_metrics, val_score, val_loss, cur_epoch)
 
         # =====  Save Model  =====
@@ -255,8 +252,7 @@ def main(opts):
     val_loss, val_score, ret_samples = model.validate(loader=test_loader_all, metrics=val_metrics,
                                                       ret_samples_ids=sample_ids)
     logger.print("Done test on all")
-    logger.info(f"*** End of Test on all, Total Loss={val_loss[0]+val_loss[1]},"
-                f" Class Loss={val_loss[0]}, Reg Loss={val_loss[1]}")
+    logger.info(f"*** End of Test on all, Total Loss={val_loss}")
 
     logger.info(val_metrics.to_str(val_score))
 
@@ -279,8 +275,7 @@ def main(opts):
         logger.info(f"*** Test the model on novel seen classes...")
         val_loss, val_score, _ = model.validate(loader=test_loader_novel, metrics=val_metrics,
                                                 ret_samples_ids=None, novel=True)
-        logger.info(f"*** End of Test on novel, Total Loss={val_loss[0] + val_loss[1]},"
-                    f" Class Loss={val_loss[0]}, Reg Loss={val_loss[1]}")
+        logger.info(f"*** End of Test on novel, Total Loss={val_loss}")
         res_novel = {
             "T-IoU": val_score['Class IoU'],
             "T-Acc": val_score['Class Acc'],
