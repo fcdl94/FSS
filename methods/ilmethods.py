@@ -50,7 +50,7 @@ class LwF(Method):
             self.criterion = self.get_criterion(task, reduction)
             self.regularizer = self.get_regularizer()
             self.model_old = self.model_old.to(device)
-            self.model_old = DistributedDataParallel(self.model_old)
+            self.reg_weight = opts.loss_kd
         # Put the model on GPU
         self.model = self.model.to(device)
         self.model = DistributedDataParallel(self.model)
@@ -70,7 +70,10 @@ class LwF(Method):
     def load_state_dict(self, checkpoint, strict=True):
         self.model.load_state_dict(checkpoint["model"], strict=strict)
         if self.model_old is not None and not strict:
-            self.model_old.load_state_dict(checkpoint["model"], strict=True)  # we are loading the old model
+            state = {}
+            for k, v in checkpoint["model"].items():
+                state[k[7:]] = v
+            self.model_old.load_state_dict(state, strict=True)  # we are loading the old model
         if strict:  # if strict, we are in ckpt (not step) so load also optim and scheduler
             self.optimizer.load_state_dict(checkpoint["optimizer"])
             self.scheduler.load_state_dict(checkpoint["scheduler"])

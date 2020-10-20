@@ -14,6 +14,7 @@ class Method:
         self.optimizer = None
         self.scheduler = None
         self.regularizer = None
+        self.reg_weight = 0.
         self.model_old = None
         self.reduction = HardNegativeMining() if opts.hnm else lambda x: x.mean()
         self.novel_classes = self.task.get_n_classes()[-1]
@@ -70,7 +71,7 @@ class Method:
                 # xxx Cross Entropy Loss
                 loss = self.reduction(criterion(outputs, labels))  # B x H x W
 
-                loss_tot = loss + rloss
+                loss_tot = loss + self.reg_weight * rloss
                 loss_tot.backward()
 
                 optim.step()

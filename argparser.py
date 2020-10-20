@@ -7,6 +7,11 @@ def modify_command_options(opts):
     if not opts.visualize:
         opts.sample_num = 0
 
+    if opts.step == 0:
+        opts.batch_size = 24
+    else:
+        opts.batch_size = 10
+
     if opts.backbone is None:
         if opts.dataset == 'cts':
             opts.backbone = 'resnext101'
@@ -27,8 +32,8 @@ def get_argparser():
     parser.add_argument("--local_rank", type=int, default=0)
     parser.add_argument("--random_seed", type=int, default=42,
                         help="random seed (default: 42)")
-    parser.add_argument("--num_workers", type=int, default=1,
-                        help='number of workers (default: 1)')
+    parser.add_argument("--num_workers", type=int, default=2,
+                        help='number of workers (default: 2)')
     parser.add_argument('--opt_level', type=str, choices=['O0', 'O1', 'O2', 'O3'], default='O0')
 
     # Dataset Options
@@ -121,6 +126,8 @@ def get_argparser():
                         help='Use this to DIS-enable Pooling in Deeplab-v3 (def. False)')
     parser.add_argument("--hnm", default=False, action='store_true',
                         help='Use this to enable Hard Negative Mining (def. False)')
+    parser.add_argument("--focal", default=False, action='store_true',
+                        help='Use this to enable Focal Loss (def. False)')
 
     # Test and Checkpoint options
     parser.add_argument("--test",  action='store_true', default=False,
@@ -144,5 +151,7 @@ def get_argparser():
     parser.add_argument("--embedding", type=str, default="fastnvec", choices=['word2vec', 'fasttext', 'fastnvec'])
     parser.add_argument("--amp_alpha", type=float, default=0.25,
                         help='Alpha value for the proxy adaptation.')
+    parser.add_argument("--loss_kd", default=1., type=float,
+                        help='The distillation loss strenght (Def 1.0)')
 
     return parser

@@ -1,11 +1,12 @@
 from .segmentation_module import make_model
 from .finetuning import FineTuning, FineTuningClassifier, AMP
 from .SPNet import SPNet, SPNet_LwF, SPNet_MiB
-from .imprinting import CosineFT, CosineFTC, WeightImprinting, DynamicWI, WeightRegression, WeightMixing
-from .ilmethods import MiB, LwF, MiB_WI
+from .imprinting import CosineFT, CosineFTC, WeightImprinting, WIC, DynamicWI, WeightRegression, WeightMixing
+from .ilmethods import MiB, LwF, LwF_WI, LwF_Cosine
 
-methods = {"FT": FineTuning, "CC": CosineFTC, "SPN": SPNet, "COS": CosineFT, "WI": WeightImprinting,
-           "AMP": AMP, "DWI": DynamicWI, "WR": WeightRegression, "WM": WeightMixing}
+methods = {"FT": FineTuning, "SPN": SPNet, "COS": CosineFT, "CC": CosineFTC, "WI": WeightImprinting, "WIC": WIC,
+           "AMP": AMP, "DWI": DynamicWI, "WR": WeightRegression, "WM": WeightMixing,
+           "LWF": LwF, "LC": LwF_Cosine, "LW": LwF_WI, "LS": SPNet_LwF}
 
 
 def get_method(opts, task, device, logger):
