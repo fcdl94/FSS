@@ -34,9 +34,11 @@ class COCO(data.Dataset):
             files = f.readlines()
 
         if train:
-            self.class_to_images_ = pkl.load(open(splits_dir + '/inverse_dict_train_coco.pkl', 'rb'))
+            path = '/inverse_dict_train_coco.pkl' if not stuff else '/inverse_dict_train_cocostuff.pkl'
+            self.class_to_images_ = pkl.load(open(splits_dir + path, 'rb'))
         else:
-            self.class_to_images_ = pkl.load(open(splits_dir + '/inverse_dict_test_coco.pkl', 'rb'))
+            path = '/inverse_dict_test_coco.pkl' if not stuff else '/inverse_dict_test_cocostuff.pkl'
+            self.class_to_images_ = pkl.load(open(splits_dir + path, 'rb'))
 
         self.images = [(osp.join(ds_root, "images", folder, x[:-1] + ".jpg"),
                         osp.join(ds_root, ann_folder, folder, x[:-1] + ".png")) for x in files]
@@ -72,4 +74,10 @@ class COCO(data.Dataset):
 class COCOFSS(FSSDataset):
     def make_dataset(self, root, train):
         data = COCO(root, train, transform=None)
+        return data
+
+
+class COCOStuffFSS(FSSDataset):
+    def make_dataset(self, root, train):
+        data = COCO(root, train, transform=None, stuff=True)
         return data

@@ -11,8 +11,8 @@ ds=voc
 
 path=checkpoints/step/${task}-${ds}
 
-gen_par="--task ${task} --dataset ${ds}"
-inc_par="--ishot ${ishot} --input_mix novel --val_interval 200 --ckpt_interval 5"
+gen_par="--task ${task} --dataset ${ds} --batch_size 10"
+inc_par="--ishot ${ishot} --input_mix novel --val_interval 1000 --ckpt_interval 5"
 
 #oname=COS_ns
 #lr=0.01
@@ -20,15 +20,10 @@ inc_par="--ishot ${ishot} --input_mix novel --val_interval 200 --ckpt_interval 5
 
 lr=0.001
 iter=1000
-oname=SPN_ns
-for ns in 1 5 10; do
-  exp --method LS --name LS_kd100 --loss_kd 100 --iter ${iter}  --lr ${lr} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/${oname}_0.pth
+for is in 0 1 2 3 4; do
+  inc_par="--ishot ${is} --input_mix novel --val_interval 1000 --ckpt_interval 5"
+  for ns in 1 2; do
+    exp --method WI --name WI-FT_supp_voc --supp_dataset voc --iter ${iter} --lr ${lr} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/COS_ns_0.pth
+    exp --method WI --name WI-FT_supp_ade --supp_dataset ade --iter ${iter} --lr ${lr} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/COS_ns_0.pth
+  done
 done
-oname=COS_ns
-for ns in 1 5 10; do
-  exp --method LC --name LC_kd100 --loss_kd 100 --iter ${iter}  --lr ${lr} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/${oname}_0.pth
-done
-for ns in 1 5 10; do
-  exp --method LW --name LW_kd100 --loss_kd 100 --iter ${iter}  --lr ${lr} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/${oname}_0.pth
-done
-

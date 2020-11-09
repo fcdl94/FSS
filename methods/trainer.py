@@ -2,10 +2,10 @@ import torch
 from torch import distributed
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel
-from utils.loss import HardNegativeMining, FocalLoss, KnowledgeDistillationLoss
+from utils.loss import HardNegativeMining, FocalLoss, KnowledgeDistillationLoss, EntropyLoss
 from .segmentation_module import make_model
 from modules.classifier import IncrementalClassifier, CosineClassifier, SPNetClassifier
-from .utils import get_scheduler
+from .utils import get_scheduler, get_batch, MeanReduction
 
 
 class Trainer:
@@ -20,6 +20,8 @@ class Trainer:
 
         self.n_channels = -1  # features size, will be initialized in make model
         self.model = self.make_model()
+        self.model = self.model.to(device)
+        self.distributed = False
         self.model_old = None
         if self.need_model_old:
             self.model_old = self.make_model(is_old=True)
@@ -32,20 +34,25 @@ class Trainer:
         if opts.fix_bn:
             self.model.fix_bn()
 
+        if opts.bn_momentum is not None:
+            self.model.bn_set_momentum(opts.bn_momentum)
+
         # xxx Set up optimizer
         params = []
-        if not opts.train_only_classifier:
+        if not opts.freeze:
             params.append({"params": filter(lambda p: p.requires_grad, self.model.body.parameters())})
 
+        if opts.lr_head != 0:
             params.append({"params": filter(lambda p: p.requires_grad, self.model.head.parameters()),
                            'lr': opts.lr * opts.lr_head})
 
-        if opts.train_only_novel:
-            params.append({"params": filter(lambda p: p.requires_grad, self.model.cls[task.step].parameters()),
-                           'lr': opts.lr * opts.lr_cls})
-        else:
-            params.append({"params": filter(lambda p: p.requires_grad, self.model.cls.parameters()),
-                           'lr': opts.lr * opts.lr_cls})
+        if opts.method != "SPN":
+            if opts.train_only_novel:
+                params.append({"params": filter(lambda p: p.requires_grad, self.model.cls.cls[task.step].parameters()),
+                               'lr': opts.lr * opts.lr_cls})
+            else:
+                params.append({"params": filter(lambda p: p.requires_grad, self.model.cls.parameters()),
+                               'lr': opts.lr * opts.lr_cls})
 
         self.optimizer = torch.optim.SGD(params, lr=opts.lr, momentum=0.9, weight_decay=opts.weight_decay)
         self.scheduler = get_scheduler(opts, self.optimizer)
@@ -57,22 +64,28 @@ class Trainer:
         else:
             self.criterion = nn.CrossEntropyLoss(ignore_index=255, reduction=reduction)
 
-        self.reduction = HardNegativeMining() if opts.hnm else lambda x: x.mean()
+        self.reduction = HardNegativeMining() if opts.hnm else MeanReduction()
 
         self.kd_crit = KnowledgeDistillationLoss(reduction="mean") if task.step > 0 and opts.loss_kd > 0 else None
         self.kd_weight = opts.loss_kd
 
-        self.initialize(opts)  # setup the model, optimizer, scheduler and criterion
+        self.supp_reg = opts.supp_reg
+        self.entropy_loss = None if self.supp_reg == 0 else EntropyLoss()
 
-        if self.model is not None:
-            # Put the model on GPU
-            self.model = self.model.to(device)
-            self.model = DistributedDataParallel(self.model)
+        self.initialize(opts)  # setup the model, optimizer, scheduler and criterion
 
     def make_model(self, is_old=False):
         classifier, self.n_channels = self.get_classifier(is_old)
         model = make_model(self.opts, classifier)
         return model
+
+    def distribute(self):
+        opts = self.opts
+        if self.model is not None:
+            # Put the model on GPU
+            self.distributed = True
+            self.model = DistributedDataParallel(self.model, device_ids=[opts.local_rank],
+                                                 output_device=opts.local_rank)  # , find_unused_parameters=True)
 
     def get_classifier(self, is_old=False):
         # here distinguish methods!
@@ -100,8 +113,10 @@ class Trainer:
     def cool_down(self, dataset, epochs=1):
         pass
 
-    def train(self, cur_epoch, train_loader, print_int=10, n_iter=1):
+    def train(self, cur_epoch, train_loader, metrics=None, print_int=10, n_iter=1, supp_loader=None):
         """Train and return epoch loss"""
+        if metrics is not None:
+            metrics.reset()
         logger = self.logger
         optim = self.optimizer
         scheduler = self.scheduler
@@ -114,9 +129,15 @@ class Trainer:
         epoch_loss = 0.0
         reg_loss = 0.0
         interval_loss = 0.0
-        rloss = torch.tensor([0.]).to(self.device)
 
         model.train()
+        if self.opts.freeze and self.opts.bn_momentum == 0:
+            model.module.body.eval()
+        if self.opts.lr_head == 0 and self.opts.bn_momentum == 0:
+            model.module.head.eval()
+
+        supp_iterator = iter(supp_loader) if supp_loader is not None else None
+
         cur_step = 0
         for iteration in range(n_iter):
             for images, labels in train_loader:
@@ -124,15 +145,26 @@ class Trainer:
                 images = images.to(device, dtype=torch.float32)
                 labels = labels.to(device, dtype=torch.long)
 
+                if supp_loader is not None:
+                    supp_iterator, supp_batch = get_batch(supp_iterator, supp_loader)
+                    supp_batch[0] = supp_batch[0].to(device)
+                    images = torch.cat((images, supp_batch[0]), dim=0)
+
+                rloss = torch.tensor([0.]).to(self.device)
                 optim.zero_grad()
                 outputs = model(images)
 
-                # xxx Cross Entropy Loss
-                loss = self.reduction(criterion(outputs, labels))  # B x H x W
+                if supp_loader is not None:
+                    if self.entropy_loss is not None:
+                        supp_out = outputs[-len(supp_batch[0]):]
+                        ent_loss = self.entropy_loss(supp_out[:, 1:])
+                        rloss += ent_loss * self.supp_reg
+                    outputs = outputs[:-len(supp_batch[0])]  # remove support images from output
+
+                loss = self.reduction(criterion(outputs, labels), labels)
 
                 # xxx Distillation/Regularization Losses
                 if self.model_old is not None:
-                    rloss = torch.tensor([0.]).to(self.device)
                     outputs_old = self.model_old(images)
                     if self.kd_crit is not None:
                         kd_loss = self.kd_weight * self.kd_crit(outputs, outputs_old)
@@ -147,6 +179,12 @@ class Trainer:
                 epoch_loss += loss.item()
                 reg_loss += rloss.item()
                 interval_loss += loss_tot.item()
+
+                _, prediction = outputs.max(dim=1)  # B, H, W
+                labels = labels.cpu().numpy()
+                prediction = prediction.cpu().numpy()
+                if metrics is not None:
+                    metrics.update(labels, prediction)
 
                 cur_step += 1
                 if cur_step % print_int == 0:
@@ -170,6 +208,10 @@ class Trainer:
         if distributed.get_rank() == 0:
             epoch_loss = epoch_loss / distributed.get_world_size() / (len(train_loader) * n_iter)
             reg_loss = reg_loss / distributed.get_world_size() / (len(train_loader) * n_iter)
+
+        # collect statistics from multiple processes
+        if metrics is not None:
+            metrics.synch(device)
 
         logger.info(f"Epoch {cur_epoch}, Class Loss={epoch_loss}, Reg Loss={reg_loss}")
 
@@ -201,7 +243,7 @@ class Trainer:
 
                 class_loss += loss.item()
 
-                _, prediction = outputs.max(dim=1)
+                _, prediction = outputs.max(dim=1)  # B, H, W
                 labels = labels.cpu().numpy()
                 prediction = prediction.cpu().numpy()
                 metrics.update(labels, prediction)
@@ -212,7 +254,6 @@ class Trainer:
 
             # collect statistics from multiple processes
             metrics.synch(device)
-            score = metrics.get_results()
 
             class_loss = torch.tensor(class_loss).to(self.device)
 
@@ -224,20 +265,29 @@ class Trainer:
             if logger is not None:
                 logger.info(f"Validation, Class Loss={class_loss}")
 
-        return class_loss, score, ret_samples
+        return class_loss, ret_samples
 
     def load_state_dict(self, checkpoint, strict=True):
-        if self.need_model_old and not strict:
-            state = {}
+        state = {}
+        if (self.need_model_old and not strict) or not self.distributed:
             for k, v in checkpoint["model"].items():
                 state[k[7:]] = v
+        state = state if not self.distributed else checkpoint['model']
+
+        if self.need_model_old and not strict:
             self.model_old.load_state_dict(state, strict=True)  # we are loading the old model
 
-        if 'module.cls.class_emb' in checkpoint['model']:
+        if 'module.cls.class_emb' in state and not strict:  # if distributed
             # remove from checkpoint since SPNClassifier is not incremental
-            del checkpoint["model"]['module.cls.class_emb']
+            del state['module.cls.class_emb']
 
-        self.model.load_state_dict(checkpoint["model"], strict=strict)
+        if 'cls.class_emb' in state and not strict:  # if not distributed
+            # remove from checkpoint since SPNClassifier is not incremental
+            del state['cls.class_emb']
+
+        model_state = state
+        self.model.load_state_dict(model_state, strict=strict)
+
         if strict:  # if strict, we are in ckpt (not step) so load also optim and scheduler
             self.optimizer.load_state_dict(checkpoint["optimizer"])
             self.scheduler.load_state_dict(checkpoint["scheduler"])

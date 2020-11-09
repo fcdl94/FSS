@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import matplotlib
+
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
@@ -114,11 +115,13 @@ class StreamSegMetrics(_StreamMetrics):
             "Mean IoU": mean_iu,
             "Class IoU": cls_iu,
             "Class Acc": cls_acc,
-            "Class Prec": cls_prec,
-            "Confusion Matrix Text": self.confusion_matrix_to_text(),
-            "Confusion Matrix": self.confusion_matrix_to_fig(),
-            "Confusion Matrix Pred": self.confusion_matrix_to_fig(norm_gt=False)
+            "Class Prec": cls_prec
         }
+
+    def get_conf_matrixes(self):
+        return {"Confusion Matrix Text": self.confusion_matrix_to_text(),
+                "Confusion Matrix": self.confusion_matrix_to_fig(),
+                "Confusion Matrix Pred": self.confusion_matrix_to_fig(norm_gt=False)}
 
     def reset(self):
         self.confusion_matrix = np.zeros((self.n_classes, self.n_classes))
@@ -162,12 +165,13 @@ class StreamSegMetrics(_StreamMetrics):
 
 class AverageMeter(object):
     """Computes average values"""
+
     def __init__(self):
         self.book = dict()
 
     def reset_all(self):
         self.book.clear()
-    
+
     def reset(self, id):
         item = self.book.get(id, None)
         if item is not None:
@@ -179,14 +183,10 @@ class AverageMeter(object):
         if record is None:
             self.book[id] = [val, 1]
         else:
-            record[0]+=val
-            record[1]+=1
+            record[0] += val
+            record[1] += 1
 
     def get_results(self, id):
         record = self.book.get(id, None)
         assert record is not None
         return record[0] / record[1]
-
-
-
-

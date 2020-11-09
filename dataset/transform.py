@@ -345,11 +345,11 @@ class RandomScale(object):
             PIL Image: Rescaled image.
             PIL Image: Rescaled label.
         """
-        assert img.size == lbl.size
         scale = random.uniform(self.scale_range[0], self.scale_range[1])
         target_size = (int(img.size[1]*scale), int(img.size[0]*scale))
 
         if lbl is not None:
+            assert img.size == lbl.size
             return F.resize(img, target_size, self.interpolation), F.resize(lbl, target_size, Image.NEAREST)
         else:
             return F.resize(img, target_size, self.interpolation)

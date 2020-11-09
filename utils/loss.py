@@ -28,7 +28,7 @@ class HardNegativeMining(nn.Module):
         super().__init__()
         self.perc = perc
 
-    def forward(self, loss):
+    def forward(self, loss, target=None):
         # inputs should be B, H, W
         B = loss.shape[0]
         loss = loss.reshape(B, -1)
@@ -38,27 +38,20 @@ class HardNegativeMining(nn.Module):
         return loss
 
 
-class UnbiasedCrossEntropy(nn.Module):
-    def __init__(self, old_cl=None, reduction='mean', ignore_index=255):
+class EntropyLoss(nn.Module):
+    def __init__(self, reduction='mean'):
         super().__init__()
         self.reduction = reduction
-        self.ignore_index = ignore_index
-        self.old_cl = old_cl
 
-    def forward(self, inputs, targets):
-
-        old_cl = self.old_cl
-        outputs = torch.zeros_like(inputs)  # B, C (1+V+N), H, W
-        den = torch.logsumexp(inputs, dim=1)                               # B, H, W       den of softmax
-        outputs[:, 0] = torch.logsumexp(inputs[:, 0:old_cl], dim=1) - den  # B, H, W       p(O)
-        outputs[:, old_cl:] = inputs[:, old_cl:] - den.unsqueeze(dim=1)    # B, N, H, W    p(N_i)
-
-        labels = targets.clone()    # B, H, W
-        labels[targets < old_cl] = 0  # just to be sure that all labels old belongs to zero
-
-        loss = F.nll_loss(outputs, labels, ignore_index=self.ignore_index, reduction=self.reduction)
-
-        return loss
+    def forward(self, inputs):
+        prob = torch.softmax(inputs, dim=1)
+        log_prob = torch.log_softmax(inputs, dim=1)
+        loss = (log_prob * prob).sum(dim=1)
+        if self.reduction == 'mean':
+            loss = torch.mean(loss)
+        elif self.reduction == 'sum':
+            loss = torch.sum(loss)
+        return -loss
 
 
 class KnowledgeDistillationLoss(nn.Module):
@@ -79,7 +72,7 @@ class KnowledgeDistillationLoss(nn.Module):
             loss = loss * mask.float()
 
         if self.reduction == 'mean':
-            outputs = -torch.mean(loss)
+            outputs = -torch.mean(loss)  # torch.masked_select(loss, mask).mean()
         elif self.reduction == 'sum':
             outputs = -torch.sum(loss)
         else:
@@ -122,3 +115,20 @@ class UnbiasedKnowledgeDistillationLoss(nn.Module):
             outputs = -loss
 
         return outputs
+
+
+class WeightRegularizationLoss(nn.Module):
+    def __init__(self, classes):
+        super().__init__()
+        self.classes = classes
+
+    @staticmethod
+    def cosine(x, y):
+        return (F.normalize(x, dim=0)*F.normalize(y, dim=0)).sum()
+
+    def forward(self, model, distributed=True):
+        cls = model.module.cls.cls if distributed else model.cls.cls
+        loss = 0.
+        for i in range(self.classes[-1]):
+            loss += self.cosine(cls[0].weight[0], cls[-1].weight[i])
+        return loss / self.classes[-1]

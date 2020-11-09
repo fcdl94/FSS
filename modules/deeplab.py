@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as functional
+from inplace_abn import ABN
 
-from models.util import try_index
+from .util import try_index
 
 
 class DeeplabV3(nn.Module):
@@ -43,7 +44,7 @@ class DeeplabV3(nn.Module):
         if last_relu:
             self.red_bn = norm_act(out_channels)
 
-        if norm_act != nn.BatchNorm2d:
+        if isinstance(self.map_bn, ABN):
             self.reset_parameters(self.map_bn.activation, self.map_bn.activation_param)
 
     def reset_parameters(self, activation, slope):
@@ -67,7 +68,7 @@ class DeeplabV3(nn.Module):
 
         # Global pooling
         if self.pooling:
-            pool = self._global_pooling(x)  # if training is global avg pooling 1x1, else use larger pool size
+            pool = self._global_pooling(x)  # if training is global avg pooling 1x1, else use pool size
             pool = self.global_pooling_conv(pool)
             pool = self.global_pooling_bn(pool)
             pool = self.pool_red_conv(pool)
@@ -103,7 +104,6 @@ class DeeplabV2(nn.Module):
     def __init__(self,
                  in_channels,
                  out_channels,
-                 hidden_channels=256,
                  out_stride=16,
                  norm_act=nn.BatchNorm2d,
                  pooling_size=None,
@@ -119,10 +119,10 @@ class DeeplabV2(nn.Module):
             raise NotImplementedError
 
         self.map_convs = nn.ModuleList([
-            nn.Conv2d(in_channels, hidden_channels, 3, bias=False, dilation=dilations[0], padding=dilations[0]),
-            nn.Conv2d(in_channels, hidden_channels, 3, bias=False, dilation=dilations[1], padding=dilations[1]),
-            nn.Conv2d(in_channels, hidden_channels, 3, bias=False, dilation=dilations[2], padding=dilations[2]),
-            nn.Conv2d(in_channels, hidden_channels, 3, bias=False, dilation=dilations[3], padding=dilations[3])
+            nn.Conv2d(in_channels, out_channels, 3, bias=False, dilation=dilations[0], padding=dilations[0]),
+            nn.Conv2d(in_channels, out_channels, 3, bias=False, dilation=dilations[1], padding=dilations[1]),
+            nn.Conv2d(in_channels, out_channels, 3, bias=False, dilation=dilations[2], padding=dilations[2]),
+            nn.Conv2d(in_channels, out_channels, 3, bias=False, dilation=dilations[3], padding=dilations[3])
         ])
 
         self.last_relu = last_relu

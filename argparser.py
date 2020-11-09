@@ -7,10 +7,11 @@ def modify_command_options(opts):
     if not opts.visualize:
         opts.sample_num = 0
 
-    if opts.step == 0:
-        opts.batch_size = 24
-    else:
-        opts.batch_size = 10
+    if opts.batch_size == -1:
+        if opts.step == 0:
+            opts.batch_size = 24
+        else:
+            opts.batch_size = 10
 
     if opts.backbone is None:
         if opts.dataset == 'cts':
@@ -18,6 +19,9 @@ def modify_command_options(opts):
         else:
             opts.backbone = 'resnet101'
 
+    if opts.train_only_classifier or opts.train_only_novel:
+        opts.freeze = True
+        opts.lr_head = 0.
     opts.no_cross_val = not opts.cross_val
     opts.pooling = round(opts.crop_size / opts.output_stride)
     opts.crop_size_test = opts.crop_size if opts.crop_size_test is None else opts.crop_size_test
@@ -40,7 +44,7 @@ def get_argparser():
     parser.add_argument("--data_root", type=str, default="data",
                         help="path to Dataset")
     parser.add_argument("--dataset", type=str, default='voc',
-                        choices=['voc', 'cts', 'coco'], help='Name of dataset')
+                        choices=['voc', 'cts', 'coco', 'coco-stuff'], help='Name of dataset')
 
     # Task Options
     parser.add_argument("--step", type=int, default=0,
@@ -62,17 +66,17 @@ def get_argparser():
 
     parser.add_argument("--fix_bn", action='store_true', default=False,
                         help='fix batch normalization during training (default: False)')
-    parser.add_argument("--batch_size", type=int, default=4,
-                        help='batch size (default: 4)')
+    parser.add_argument("--batch_size", type=int, default=-1,
+                        help='batch size (default: 24/10)')
     parser.add_argument("--crop_size", type=int, default=512,
                         help="crop size (default: 512)")
-    parser.add_argument("--full_res", action='store_true', default=False,
-                        help='Use full resolution images in train (default: False)')
     parser.add_argument("--crop_size_test", type=int, default=None,
                         help="test crop size (default: = --crop_size)")
 
     parser.add_argument("--lr", type=float, default=0.01,
                         help="learning rate (default: 0.01)")
+    parser.add_argument("--freeze", action='store_true', default=False,
+                        help="Freeze body (default: False)")
     parser.add_argument("--lr_head", type=float, default=1,
                         help="learning rate scaler for ASPP (default: 1)")
     parser.add_argument("--lr_cls", type=float, default=1,
@@ -117,7 +121,8 @@ def get_argparser():
     parser.add_argument("--no_pretrained", action='store_true', default=False,
                         help='Wheather to use pretrained or not (def: True)')
     parser.add_argument("--norm_act", type=str, default="iabn_sync",
-                        choices=['iabn_sync', 'iabn', 'abn', 'std'], help='Which BN to use (def: abn_sync')
+                        # choices=['riabn_sync', 'riabn_sync2', 'iabn_sync', 'iabn', 'abn', 'rabn', 'ain'],
+                        help='Which BN to use (def: iabn_sync')
 
     parser.add_argument("--n_feat", type=int, default=256,
                         help="Feature size (default: 256)")
@@ -153,9 +158,22 @@ def get_argparser():
                         help='Alpha value for the proxy adaptation.')
     parser.add_argument("--loss_kd", default=0, type=float,
                         help='The distillation loss strenght (Def 0.)')
+    parser.add_argument("--supp_reg", default=0, type=float,
+                        help='The regularization loss strenght (Def 0.)')
     parser.add_argument("--train_only_classifier", action='store_true', default=False,
                         help="Freeze body and head of network (default: False)")
     parser.add_argument("--train_only_novel", action='store_true', default=False,
                         help="Train only the classifier of current step (default: False)")
-
+    parser.add_argument("--bn_momentum", default=None, type=float,
+                        help="The BN momentum (Set to 0 to avoid update of running stats.)")
+    parser.add_argument("--strong_scale", action='store_true', default=False,
+                        help="Use strong scale augmentation (default: False)")
+    parser.add_argument("--supp_dataset", type=str, default=None,
+                        help="Use a support dataset (default: None)")
+    parser.add_argument("--supp_img", type=int, default=None,
+                        help="Number of support images (default: All the dataset)")
+    parser.add_argument("--pixel_imprinting", action='store_true', default=False,
+                        help="Use only a pixel for imprinting when with WI (default: False)")
+    parser.add_argument("--weight_mix", action='store_true', default=False,
+                        help="When doing WI, sum to proto the mix of old weights (default: False)")
     return parser

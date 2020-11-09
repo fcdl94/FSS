@@ -3,6 +3,12 @@ import torch
 import torch.nn.functional as F
 
 
+class MeanReduction:
+    def __call__(self, x, target):
+        x = x[target != 255]
+        return x.mean()
+
+
 def get_scheduler(opts, optim):
     if opts.lr_policy == 'poly':
         scheduler = utils.PolyLR(optim, max_iters=opts.max_iter, power=opts.lr_power)
@@ -50,3 +56,18 @@ def get_prototype(model, ds, cl, device, interpolate_label=True):
 def norm_mean(x):
     # x should be N x F, return 1 x F
     return F.normalize(x, dim=1).mean(dim=0, keepdim=True)
+
+
+class myReLU(torch.nn.Module):
+    __constants__ = ['inplace']
+
+    def __init__(self, inchannels=None, inplace=False):
+        super().__init__()
+        self.inplace = inplace
+
+    def forward(self, input):
+        return F.relu(input, inplace=self.inplace)
+
+    def extra_repr(self):
+        inplace_str = 'inplace=True' if self.inplace else ''
+        return inplace_str

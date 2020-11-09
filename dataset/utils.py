@@ -1,6 +1,9 @@
 import torch
 import numpy as np
 import bisect
+import os
+import os.path as osp
+from PIL import Image
 
 
 def cumsum(sequence):
@@ -113,3 +116,43 @@ class ConcatDataset(torch.utils.data.Dataset):
             sample_idx = idx - self.cumulative_sizes[dataset_idx - 1]
         return self.datasets[dataset_idx][sample_idx]
 
+
+class MyImageFolder(torch.utils.data.Dataset):
+
+    def __init__(self, root, transform=None):
+        super(MyImageFolder, self).__init__()
+        directory = os.path.expanduser(root)
+        assert osp.isdir(directory), f"Root must be a directory - {directory}"
+        self.files = []
+        for name in os.listdir(directory):
+            if self.has_file_allowed_extension(name):
+                self.files.append(osp.join(directory, name))
+        self.transform = transform
+
+    def __getitem__(self, index):
+        sample = Image.open(self.files[index]).convert('RGB')
+        if self.transform is not None:
+            sample = self.transform(sample)
+        return sample, 0
+
+    def __len__(self):
+        return len(self.files)
+
+    @staticmethod
+    def has_file_allowed_extension(filename):
+        extensions = ('.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif', '.tiff', '.webp')
+        return filename.lower().endswith(extensions)
+
+
+class RandomDataset(torch.utils.data.Dataset):
+
+    def __init__(self, crop_size=512):
+        super().__init__()
+        self.size = crop_size
+
+    def __getitem__(self, index):
+        sample = torch.randn(3, self.size, self.size)
+        return sample, 0
+
+    def __len__(self):
+        return 10000

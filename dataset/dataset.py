@@ -27,9 +27,11 @@ class FSSDataset(data.Dataset):
         self.inverted_order = {lb: self.order.index(lb) for lb in self.order}
         if train:
             self.inverted_order[255] = 255
-            self.inverted_order[0] = task.background_label
+            if task.use_bkg:
+                self.inverted_order[0] = task.background_label
         else:
-            self.inverted_order[0] = task.background_label
+            if task.use_bkg:
+                self.inverted_order[0] = task.background_label
             self.set_up_void_test()
 
         self.multi_idxs = False
@@ -45,7 +47,7 @@ class FSSDataset(data.Dataset):
             if task.disjoint:
                 idxs = {x for x in range(len(self.full_data))}
                 for cl, img_set in self.full_data.class_to_images.items():
-                    if cl not in self.labels and cl != 0:
+                    if cl not in self.labels and (cl != 0 or not task.use_bkg):
                         idxs = idxs.difference(img_set)
                 idxs = list(idxs)
                 target_transform = self.get_mapping_transform(self.labels, masking, masking_value)
