@@ -3,7 +3,7 @@ import torch.utils.data as data
 import numpy as np
 from torch import from_numpy
 from PIL import Image
-import pickle as pkl
+import pickle5 as pkl
 from .dataset import FSSDataset
 
 eval_classes = [7, 8, 11, 12, 13, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 31, 32, 33]

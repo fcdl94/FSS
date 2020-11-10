@@ -1,6 +1,6 @@
 from torch import nn
 import torch
-import pickle
+import pickle5 as pickle
 from torch.nn import functional as F
 import numpy as np
 from torch.nn import Parameter

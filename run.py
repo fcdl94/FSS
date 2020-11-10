@@ -110,7 +110,7 @@ def main(opts):
 
     if opts.supp_dataset:
         train_dst, val_dst, train_dst_no_aug, supp_data = get_dataset(opts, task, train=True)
-        supp_loader = data.DataLoader(supp_data, batch_size=min(opts.batch_size, len(train_dst)),  # train dst
+        supp_loader = data.DataLoader(supp_data, batch_size=min(opts.batch_size, len(train_dst), len(supp_data)),
                                       sampler=DistributedSampler(supp_data, num_replicas=world_size, rank=rank),
                                       num_workers=opts.num_workers)  # train dst to match same bs of train dst
     else:

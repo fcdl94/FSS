@@ -2,7 +2,7 @@ import os.path as osp
 import torch.utils.data as data
 from .dataset import FSSDataset
 import numpy as np
-import pickle as pkl
+import pickle5 as pkl
 
 from PIL import Image
 

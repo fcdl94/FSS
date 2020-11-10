@@ -3,7 +3,7 @@ import torch.utils.data as data
 import numpy as np
 from torch import from_numpy
 from PIL import Image
-import pickle as pkl
+import pickle5 as pkl
 from .dataset import FSSDataset
 
 ignore_labels = [11, 25, 28, 29, 44, 65, 67, 68, 70, 82, 90]

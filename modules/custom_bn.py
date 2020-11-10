@@ -36,12 +36,14 @@ class AIN(nn.Module):
         self.track_running_stats = track_running_stats
         self.activation = activation
         self.activation_param = activation_param
+
         if self.affine:
             self.weight = nn.Parameter(torch.ones(num_features))
             self.bias = nn.Parameter(torch.zeros(num_features))
         else:
             self.register_parameter('weight', None)
             self.register_parameter('bias', None)
+
         if self.track_running_stats:
             self.register_buffer('running_mean', torch.zeros(num_features))
             self.register_buffer('running_var', torch.ones(num_features))
