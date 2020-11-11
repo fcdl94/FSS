@@ -158,14 +158,21 @@ def get_argparser():
                         help='Alpha value for the proxy adaptation.')
     parser.add_argument("--loss_kd", default=0, type=float,
                         help='The distillation loss strenght (Def 0.)')
-    parser.add_argument("--supp_reg", default=0, type=float,
-                        help='The regularization loss strenght (Def 0.)')
+    parser.add_argument("--l2_loss", default=0, type=float,
+                        help='The MSE feature loss strenght (Def 0.)')
+    parser.add_argument("--l1_loss", default=0, type=float,
+                        help='The L1 feature loss strenght (Def 0.)')
+    parser.add_argument("--cos_loss", default=0, type=float,
+                        help='The feature loss strenght (Def 0.)')
+
     parser.add_argument("--train_only_classifier", action='store_true', default=False,
                         help="Freeze body and head of network (default: False)")
     parser.add_argument("--train_only_novel", action='store_true', default=False,
                         help="Train only the classifier of current step (default: False)")
     parser.add_argument("--bn_momentum", default=None, type=float,
                         help="The BN momentum (Set to 0 to avoid update of running stats.)")
+
+    # to remove
     parser.add_argument("--strong_scale", action='store_true', default=False,
                         help="Use strong scale augmentation (default: False)")
     parser.add_argument("--supp_dataset", type=str, default=None,

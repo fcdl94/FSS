@@ -6,7 +6,7 @@ alias exp="python -m torch.distributed.launch --master_port ${port} --nproc_per_
 shopt -s expand_aliases
 
 ishot=0
-task=voc
+task=spn
 ds=coco
 
 path=checkpoints/step/voc-coco

@@ -4,7 +4,7 @@ import torch.nn.functional as functional
 
 import inplace_abn
 from inplace_abn import InPlaceABNSync, InPlaceABN, ABN
-from modules.custom_bn import AIN, RandABN, RandInPlaceABNSync, ABR
+from modules.custom_bn import AIN, RandABN, RandInPlaceABNSync, ABR, InPlaceABR
 from functools import partial
 
 import models
@@ -20,6 +20,8 @@ def make_model(opts, cls=None, head_channels=None):
         norm = partial(ABN, activation="leaky_relu", activation_param=.01)
     elif opts.norm_act == 'abr':
         norm = partial(ABR, activation="leaky_relu", activation_param=.01)
+    elif opts.norm_act == 'iabr':
+        norm = partial(InPlaceABR, activation="leaky_relu", activation_param=.01)
     elif opts.norm_act == 'ain':
         norm = partial(AIN, activation="leaky_relu", activation_param=.01)
     elif opts.norm_act == 'rabn':
@@ -71,7 +73,7 @@ class SegmentationModule(nn.Module):
         self.head_channels = head_channels
         self.cls = classifier
 
-    def forward(self, x, use_classifier=True, body_feat=False):
+    def forward(self, x, use_classifier=True, return_feat=False):
 
         x_b = self.body(x)
         if isinstance(x_b, dict):
@@ -86,8 +88,9 @@ class SegmentationModule(nn.Module):
         else:
             sem_logits = out
 
-        if body_feat:
-            return sem_logits, x_b
+        if return_feat:
+            return sem_logits, out
+
         return sem_logits
 
     def freeze(self):

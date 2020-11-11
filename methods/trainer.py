@@ -2,7 +2,7 @@ import torch
 from torch import distributed
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel
-from utils.loss import HardNegativeMining, FocalLoss, KnowledgeDistillationLoss, EntropyLoss
+from utils.loss import HardNegativeMining, FocalLoss, KnowledgeDistillationLoss, CosineLoss
 from .segmentation_module import make_model
 from modules.classifier import IncrementalClassifier, CosineClassifier, SPNetClassifier
 from .utils import get_scheduler, get_batch, MeanReduction
@@ -16,7 +16,7 @@ class Trainer:
         self.opts = opts
         self.novel_classes = self.task.get_n_classes()[-1]
         self.step = task.step
-        self.need_model_old = task.step > 0 and (opts.loss_kd > 0)
+        self.need_model_old = task.step > 0 and (opts.loss_kd > 0 or opts.l2_loss > 0 or opts.l1_loss > 0 or opts.cos_loss > 0)
 
         self.n_channels = -1  # features size, will be initialized in make model
         self.model = self.make_model()
@@ -66,11 +66,17 @@ class Trainer:
 
         self.reduction = HardNegativeMining() if opts.hnm else MeanReduction()
 
-        self.kd_crit = KnowledgeDistillationLoss(reduction="mean") if task.step > 0 and opts.loss_kd > 0 else None
-        self.kd_weight = opts.loss_kd
+        self.l2_loss = opts.l2_loss
+        self.l2_criterion = nn.MSELoss() if task.step > 0 and opts.l2_loss > 0 else None
 
-        self.supp_reg = opts.supp_reg
-        self.entropy_loss = None if self.supp_reg == 0 else EntropyLoss()
+        self.cos_loss = opts.cos_loss
+        self.cos_criterion = CosineLoss() if task.step > 0 and opts.cos_loss > 0 else None
+
+        self.kd_loss = opts.loss_kd
+        self.kd_criterion = KnowledgeDistillationLoss(reduction="mean") if task.step > 0 and opts.loss_kd > 0 else None
+
+        self.l1_loss = opts.l1_loss
+        self.l1_criterion = nn.L1Loss() if task.step > 0 and opts.l1_loss > 0 else None
 
         self.initialize(opts)  # setup the model, optimizer, scheduler and criterion
 
@@ -152,23 +158,28 @@ class Trainer:
 
                 rloss = torch.tensor([0.]).to(self.device)
                 optim.zero_grad()
-                outputs = model(images)
+                outputs, feat = model(images, return_feat=True)
 
                 if supp_loader is not None:
-                    if self.entropy_loss is not None:
-                        supp_out = outputs[-len(supp_batch[0]):]
-                        ent_loss = self.entropy_loss(supp_out[:, 1:])
-                        rloss += ent_loss * self.supp_reg
                     outputs = outputs[:-len(supp_batch[0])]  # remove support images from output
-
-                loss = self.reduction(criterion(outputs, labels), labels)
 
                 # xxx Distillation/Regularization Losses
                 if self.model_old is not None:
-                    outputs_old = self.model_old(images)
-                    if self.kd_crit is not None:
-                        kd_loss = self.kd_weight * self.kd_crit(outputs, outputs_old)
+                    outputs_old, feat_old = self.model_old(images, return_feat=True)
+                    if self.kd_loss:
+                        kd_loss = self.kd_loss * self.kd_criterion(outputs, outputs_old)
                         rloss += kd_loss
+                    if self.l2_criterion is not None:
+                        l2_loss = self.l2_loss * self.l2_criterion(feat, feat_old)
+                        rloss += l2_loss
+                    if self.l1_criterion is not None:
+                        l1_loss = self.l1_loss * self.l1_criterion(feat, feat_old)
+                        rloss += l1_loss
+                    if self.cos_criterion is not None:
+                        cos_loss = self.cos_loss * self.cos_criterion(feat, feat_old)
+                        rloss += cos_loss
+
+                loss = self.reduction(criterion(outputs, labels), labels)
 
                 loss_tot = loss + rloss
                 loss_tot.backward()

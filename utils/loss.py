@@ -117,18 +117,19 @@ class UnbiasedKnowledgeDistillationLoss(nn.Module):
         return outputs
 
 
-class WeightRegularizationLoss(nn.Module):
-    def __init__(self, classes):
+class CosineLoss(nn.Module):
+    def __init__(self, reduction='mean'):
         super().__init__()
-        self.classes = classes
+        self.reduction = reduction
+        self.crit = nn.CosineSimilarity(dim=1)
 
-    @staticmethod
-    def cosine(x, y):
-        return (F.normalize(x, dim=0)*F.normalize(y, dim=0)).sum()
+    def forward(self, x, y):
+        loss = self.crit(x, y)
 
-    def forward(self, model, distributed=True):
-        cls = model.module.cls.cls if distributed else model.cls.cls
-        loss = 0.
-        for i in range(self.classes[-1]):
-            loss += self.cosine(cls[0].weight[0], cls[-1].weight[i])
-        return loss / self.classes[-1]
+        if self.reduction == 'mean':
+            loss = torch.mean(loss)
+        elif self.reduction == 'sum':
+            loss = torch.sum(loss)
+        else:
+            loss = loss
+        return - loss
