@@ -108,14 +108,7 @@ def main(opts):
     np.random.seed(opts.random_seed)
     random.seed(opts.random_seed)
 
-    if opts.supp_dataset:
-        train_dst, val_dst, train_dst_no_aug, supp_data = get_dataset(opts, task, train=True)
-        supp_loader = data.DataLoader(supp_data, batch_size=min(opts.batch_size, len(train_dst), len(supp_data)),
-                                      sampler=DistributedSampler(supp_data, num_replicas=world_size, rank=rank),
-                                      num_workers=opts.num_workers)  # train dst to match same bs of train dst
-    else:
-        train_dst, val_dst, train_dst_no_aug = get_dataset(opts, task, train=True)
-        supp_loader = None
+    train_dst, val_dst, train_dst_no_aug = get_dataset(opts, task, train=True)
     logger.info(f"Dataset: {opts.dataset}, Train set: {len(train_dst)}, Val set: {len(val_dst)}")
 
     train_loader = data.DataLoader(train_dst, batch_size=min(opts.batch_size, len(train_dst)),
@@ -190,9 +183,8 @@ def main(opts):
     # train/val here
     while cur_epoch < opts.epochs and not opts.test:
         # =====  Train  =====
-        train_loader.sampler.set_epoch(cur_epoch)  # setup dataloader sampler
         start = time.time()
-        epoch_loss = model.train(cur_epoch=cur_epoch, train_loader=train_loader, supp_loader=supp_loader,
+        epoch_loss = model.train(cur_epoch=cur_epoch, train_loader=train_loader,
                                  metrics=train_metrics, print_int=opts.print_interval,
                                  n_iter=train_iterations)
         train_score = train_metrics.get_results()
@@ -209,7 +201,7 @@ def main(opts):
         logger.add_scalar("E-Loss-cls", epoch_loss[0], cur_epoch)
 
         # =====  Validation  =====
-        if (cur_epoch + 1) % opts.val_interval == 0:
+        if (cur_epoch + 1) % opts.val_interval == 0 and False:
             logger.info("validate on val set...")
             val_loss, _ = model.validate(loader=val_loader, metrics=val_metrics, ret_samples_ids=None)
             val_score = val_metrics.get_results()
@@ -246,9 +238,6 @@ def main(opts):
     test_loader_all = data.DataLoader(test_dst_all, batch_size=1,
                                       sampler=DistributedSampler(test_dst_all, num_replicas=world_size, rank=rank),
                                       num_workers=opts.num_workers)
-    test_loader_novel = data.DataLoader(test_dst_novel, batch_size=1,
-                                        sampler=DistributedSampler(test_dst_novel, num_replicas=world_size, rank=rank),
-                                        num_workers=opts.num_workers)
 
     if rank == 0 and opts.sample_num > 0:
         sample_ids = np.random.choice(len(test_loader_all), opts.sample_num, replace=False)  # sample idxs for visual.
@@ -288,19 +277,6 @@ def main(opts):
     ret = val_score['Mean IoU']
 
     logger.log_results(task=task, name=opts.name, results=val_score['Class IoU'].values())
-
-    # if opts.step > 0:
-    #     logger.info(f"*** Test the model on novel seen classes...")
-    #     val_loss, val_score, _ = model.validate(loader=test_loader_novel, metrics=val_metrics,
-    #                                             ret_samples_ids=None, novel=True)
-    #     logger.info(f"*** End of Test on novel, Total Loss={val_loss}")
-    #     res_novel = {
-    #         "T-IoU": val_score['Class IoU'],
-    #         "T-Acc": val_score['Class Acc'],
-    #         "T-Prec": val_score['Class Prec'],
-    #     }
-    #     logger.add_results(res_novel, "Results_novel")
-    #     logger.log_results(task=task, name=opts.name, results=val_score['Class IoU'].values(), novel=True)
 
     logger.close()
     return ret

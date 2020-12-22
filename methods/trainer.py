@@ -91,7 +91,7 @@ class Trainer:
             # Put the model on GPU
             self.distributed = True
             self.model = DistributedDataParallel(self.model, device_ids=[opts.local_rank],
-                                                 output_device=opts.local_rank)  # , find_unused_parameters=True)
+                                                 output_device=opts.local_rank, find_unused_parameters=True)
 
     def get_classifier(self, is_old=False):
         # here distinguish methods!
@@ -119,7 +119,7 @@ class Trainer:
     def cool_down(self, dataset, epochs=1):
         pass
 
-    def train(self, cur_epoch, train_loader, metrics=None, print_int=10, n_iter=1, supp_loader=None):
+    def train(self, cur_epoch, train_loader, metrics=None, print_int=10, n_iter=1):
         """Train and return epoch loss"""
         if metrics is not None:
             metrics.reset()
@@ -142,26 +142,17 @@ class Trainer:
         if self.opts.lr_head == 0 and self.opts.bn_momentum == 0:
             model.module.head.eval()
 
-        supp_iterator = iter(supp_loader) if supp_loader is not None else None
-
         cur_step = 0
         for iteration in range(n_iter):
+            train_loader.sampler.set_epoch(cur_epoch*n_iter + iteration)  # setup dataloader sampler
             for images, labels in train_loader:
 
                 images = images.to(device, dtype=torch.float32)
                 labels = labels.to(device, dtype=torch.long)
 
-                if supp_loader is not None:
-                    supp_iterator, supp_batch = get_batch(supp_iterator, supp_loader)
-                    supp_batch[0] = supp_batch[0].to(device)
-                    images = torch.cat((images, supp_batch[0]), dim=0)
-
                 rloss = torch.tensor([0.]).to(self.device)
                 optim.zero_grad()
                 outputs, feat = model(images, return_feat=True)
-
-                if supp_loader is not None:
-                    outputs = outputs[:-len(supp_batch[0])]  # remove support images from output
 
                 # xxx Distillation/Regularization Losses
                 if self.model_old is not None:
@@ -182,6 +173,7 @@ class Trainer:
                 loss = self.reduction(criterion(outputs, labels), labels)
 
                 loss_tot = loss + rloss
+                assert not torch.isnan(loss_tot), "Error, loss is NaN!"
                 loss_tot.backward()
 
                 optim.step()
@@ -198,6 +190,7 @@ class Trainer:
                     metrics.update(labels, prediction)
 
                 cur_step += 1
+
                 if cur_step % print_int == 0:
                     interval_loss = interval_loss / print_int
                     logger.info(f"Epoch {cur_epoch}, Batch {cur_step}/{n_iter}*{len(train_loader)},"

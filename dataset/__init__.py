@@ -77,22 +77,6 @@ def get_dataset(opts, task, train=True):
             train_dst = dataset(root=opts.data_root, task=task, train=True, transform=train_transform)
             train_dst_noaug = dataset(root=opts.data_root, task=task, train=True, transform=test_transform)
             val_dst = dataset(root=opts.data_root, task=task, train=False, transform=val_transform)
-        if opts.supp_dataset is not None:
-            if opts.supp_dataset == "coco":
-                supp = COCO(root=opts.data_root, train=True, transform=train_transform)
-            elif opts.supp_dataset == "voc":
-                supp = VOCSegmentation(root=opts.data_root, train=True, transform=train_transform)
-            elif opts.supp_dataset == "ade":
-                supp = AdeSegmentation(root="/vandal/datasets", train=True, transform=train_transform)
-            elif opts.supp_dataset == "imagenet":
-                supp = MyImageFolder("/vandal/datasets/ImageNet/val", train_transform)
-            elif opts.supp_dataset == "random":
-                supp = RandomDataset(opts.crop_size)
-            else:
-                raise NotImplementedError
-            if opts.supp_img is not None:
-                supp = Subset(supp, random.choices(range(len(supp)), k=opts.supp_img))
-            return train_dst, val_dst, train_dst_noaug, supp
 
         return train_dst, val_dst, train_dst_noaug
     else:

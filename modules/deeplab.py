@@ -40,6 +40,7 @@ class DeeplabV3(nn.Module):
         self.pool_red_conv = nn.Conv2d(hidden_channels, out_channels, 1, bias=False)
 
         self.pooling = pooling
+
         self.last_relu = last_relu
         if last_relu:
             self.red_bn = norm_act(out_channels)
@@ -67,14 +68,16 @@ class DeeplabV3(nn.Module):
         out = self.red_conv(out)
 
         # Global pooling
-        if self.pooling:
-            pool = self._global_pooling(x)  # if training is global avg pooling 1x1, else use pool size
-            pool = self.global_pooling_conv(pool)
-            pool = self.global_pooling_bn(pool)
-            pool = self.pool_red_conv(pool)
-            if self.training or self.pooling_size is None:
-                pool = pool.repeat(1, 1, x.size(2), x.size(3))
-            out += pool
+        if not self.pooling:
+            self.global_pooling_bn.eval()
+
+        pool = self._global_pooling(x)  # if training is global avg pooling 1x1, else use pool size
+        pool = self.global_pooling_conv(pool)
+        pool = self.global_pooling_bn(pool)
+        pool = self.pool_red_conv(pool)
+        if self.training or self.pooling_size is None:
+            pool = pool.repeat(1, 1, x.size(2), x.size(3))
+        out += pool
 
         if self.last_relu:
             out = self.red_bn(out)

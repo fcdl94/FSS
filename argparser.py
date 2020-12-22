@@ -19,9 +19,15 @@ def modify_command_options(opts):
         else:
             opts.backbone = 'resnet101'
 
+    if opts.method == "GIFS":
+        opts.method = "WI"
+        opts.norm_act = "iabr"
+        opts.l2_loss = 0.1 if opts.l2_loss == 0 else opts.l2_loss
+
     if opts.train_only_classifier or opts.train_only_novel:
         opts.freeze = True
         opts.lr_head = 0.
+
     opts.no_cross_val = not opts.cross_val
     opts.pooling = round(opts.crop_size / opts.output_stride)
     opts.crop_size_test = opts.crop_size if opts.crop_size_test is None else opts.crop_size_test
@@ -175,10 +181,6 @@ def get_argparser():
     # to remove
     parser.add_argument("--strong_scale", action='store_true', default=False,
                         help="Use strong scale augmentation (default: False)")
-    parser.add_argument("--supp_dataset", type=str, default=None,
-                        help="Use a support dataset (default: None)")
-    parser.add_argument("--supp_img", type=int, default=None,
-                        help="Number of support images (default: All the dataset)")
     parser.add_argument("--pixel_imprinting", action='store_true', default=False,
                         help="Use only a pixel for imprinting when with WI (default: False)")
     parser.add_argument("--weight_mix", action='store_true', default=False,

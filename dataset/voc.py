@@ -47,10 +47,7 @@ class VOCSegmentation(data.Dataset):
             and returns a transformed version. E.g, ``transforms.RandomCrop``
     """
 
-    def __init__(self,
-                 root="data",
-                 train=True,
-                 transform=None):
+    def __init__(self, root="data", train=True, transform=None, coco_labels=False):
 
         if train:
             split = 'train_ids'
@@ -68,12 +65,16 @@ class VOCSegmentation(data.Dataset):
                                f' Download it with download_voc and then link it into {voc_root}.')
 
         if train:
-            self.class_to_images_ = pkl.load(open(splits_dir+'inverse_dict_train.pkl', 'rb'))
+            self.class_to_images_ = pkl.load(open(splits_dir + 'inverse_dict_train.pkl', 'rb'))
         else:
             self.class_to_images_ = None
 
         self.images = np.load(osp.join(splits_dir, split + '.npy'))
-        self.images = [(osp.join(voc_root, "images", i + ".jpg"), osp.join(voc_root, "annotations", i + ".png"))
+        if coco_labels:
+            annotation_folder = "annotations_coco"
+        else:
+            annotation_folder = "annotations"
+        self.images = [(osp.join(voc_root, "images", i + ".jpg"), osp.join(voc_root, annotation_folder, i + ".png"))
                        for i in self.images]
 
     @property

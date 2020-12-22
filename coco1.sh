@@ -18,11 +18,11 @@ iter=200
 for is in 0 1 2 3 4; do
 inc_par="--ishot ${is} --input_mix novel --val_interval 1000 --ckpt_interval 5 --no_pooling"
 for ns in 1; do
-  exp --method AMP --name AMP --iter 0 --lr ${lr} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/FT_0.pth
-  exp --method FT --name FT --iter ${iter} --lr ${lr} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/FT_0.pth
+#  exp --method WI --name WI --iter 0 --lr ${lr} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/COS_0.pth
+  exp --method WI --name WIT --iter ${iter} --lr ${lr} ${gen_par} ${inc_par} --step 1 --nshot ${ns} --step_ckpt ${path}/COS_0.pth
     for step in 2 3 4 5 6 7; do
-        exp --method AMP --name AMP --iter 0 --lr ${lr} ${gen_par} ${inc_par} --step ${step} --nshot ${ns}
-        exp --method FT --name FT --iter ${iter} --lr ${lr} ${gen_par} ${inc_par} --step ${step} --nshot ${ns}
+#        exp --method WI --name WI --iter 0 --lr ${lr} ${gen_par} ${inc_par} --step ${step} --nshot ${ns}
+        exp --method WI --name WIT --iter ${iter} --lr ${lr} ${gen_par} ${inc_par} --step ${step} --nshot ${ns}
     done
   done
 done
