@@ -5,8 +5,8 @@ alias exp="python -m torch.distributed.launch --master_port $2 --nproc_per_node=
 shopt -s expand_aliases
 
 task=$3
-#gen_par="--task spn --dataset coco --epochs 20 --batch_size 24 --crop_size 512 --val_interval 1"
-gen_par="--task ${task} --dataset voc --epochs 30 --batch_size 24 --crop_size 512 --val_interval 1"
+gen_par="--task ${task} --dataset coco --epochs 20 --batch_size 24 --crop_size 512 --val_interval 1"
+#gen_par="--task ${task} --dataset voc --epochs 30 --batch_size 24 --crop_size 512 --val_interval 1"
 #gen_par="--task voc --dataset coco-stuff --lr 0.01 --epochs 20 --batch_size 24 --crop_size 512 --val_interval 1"
 
 lr=0.01

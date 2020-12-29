@@ -6,7 +6,7 @@ from PIL import Image
 import pickle5 as pkl
 from .dataset import FSSDataset
 
-ignore_labels = [11, 25, 28, 29, 44, 65, 67, 68, 70, 82, 90]
+ignore_labels = [12, 26, 29, 30, 45, 66, 68, 69, 71, 83, 91]  # starting from 1=person
 
 
 class COCO(data.Dataset):
@@ -14,7 +14,7 @@ class COCO(data.Dataset):
     def __init__(self, root, train=True, transform=None, target_transform=None, stuff=False):
 
         root = osp.expanduser(root)
-        base_dir = "coco"
+        base_dir = "coco" if not stuff else "coco-stuff"
         ds_root = osp.join(root, base_dir)
         splits_dir = osp.join(ds_root, 'split')
 
@@ -25,19 +25,16 @@ class COCO(data.Dataset):
             split_f = osp.join(splits_dir, 'val.txt')
             folder = 'val2017'
 
-        if stuff:
-            ann_folder = "annotations"
-        else:
-            ann_folder = "annotations_obj"
+        ann_folder = "annotations"
 
         with open(osp.join(split_f), "r") as f:
             files = f.readlines()
 
         if train:
-            path = '/inverse_dict_train_coco.pkl' if not stuff else '/inverse_dict_train_cocostuff.pkl'
+            path = '/inverse_dict_train_coco.pkl'
             self.class_to_images_ = pkl.load(open(splits_dir + path, 'rb'))
         else:
-            path = '/inverse_dict_test_coco.pkl' if not stuff else '/inverse_dict_test_cocostuff.pkl'
+            path = '/inverse_dict_test_coco.pkl'
             self.class_to_images_ = pkl.load(open(splits_dir + path, 'rb'))
 
         self.images = [(osp.join(ds_root, "images", folder, x[:-1] + ".jpg"),

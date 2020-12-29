@@ -35,10 +35,11 @@ def get_dataset(opts, task, train=True):
     elif opts.dataset == 'voc' or 'coco' in opts.dataset:
         if opts.dataset == 'voc':
             dataset = VOCFSSDataset
-        elif opts.dataset == 'coco':
-            dataset = COCOFSS
         else:
-            dataset = COCOStuffFSS
+            if 'stuff' in opts.dataset:
+                dataset = COCOStuffFSS
+            else:
+                dataset = COCOFSS
         scale = RandomScale((0.5, 2)) if not opts.strong_scale else RandomScale((0.5, 4))
         train_transform = Compose([
             scale,
