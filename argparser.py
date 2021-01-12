@@ -14,15 +14,24 @@ def modify_command_options(opts):
             opts.batch_size = 10
 
     if opts.backbone is None:
-        if opts.dataset == 'cts':
-            opts.backbone = 'resnext101'
-        else:
-            opts.backbone = 'resnet101'
+        opts.backbone = 'resnet101'
 
     if opts.method == "GIFS":
         opts.method = "WI"
         opts.norm_act = "iabr"
         opts.l2_loss = 0.1 if opts.l2_loss == 0 else opts.l2_loss
+    elif opts.method == 'LWF':
+        opts.loss_kd = 10 if opts.loss_kd == 0 else opts.loss_kd
+        opts.method = "FT"
+    elif opts.method == 'MIB':
+        opts.mib_kd = 10 if opts.mib_kd == 0 else opts.mib_kd
+        opts.mib_ce = True
+        opts.init_mib = True
+        opts.method = "FT"
+    elif opts.method == 'ILT':
+        opts.loss_kd = 10 if opts.loss_kd == 0 else opts.loss_kd
+        opts.loss_de = 10 if opts.loss_de == 0 else opts.loss_de
+        opts.method = "FT"
 
     if opts.train_only_classifier or opts.train_only_novel:
         opts.freeze = True
@@ -162,14 +171,22 @@ def get_argparser():
     parser.add_argument("--embedding", type=str, default="fastnvec", choices=['word2vec', 'fasttext', 'fastnvec'])
     parser.add_argument("--amp_alpha", type=float, default=0.25,
                         help='Alpha value for the proxy adaptation.')
+    parser.add_argument("--mib_ce", default=False, action='store_true',
+                        help='Use the MiB classification loss (Def No)')
+    parser.add_argument("--init_mib", default=False, action='store_true',
+                        help='Use the MiB initialization (Def No)')
+    parser.add_argument("--mib_kd", default=0, type=float,
+                        help='The MiB distillation loss strength (Def 0.)')
     parser.add_argument("--loss_kd", default=0, type=float,
-                        help='The distillation loss strenght (Def 0.)')
+                        help='The distillation loss strength (Def 0.)')
     parser.add_argument("--l2_loss", default=0, type=float,
-                        help='The MSE feature loss strenght (Def 0.)')
+                        help='The MSE feature loss strength (Def 0.)')
+    parser.add_argument("--loss_de", default=0, type=float,
+                        help='The MSE-body feature loss strength (Def 0.)')
     parser.add_argument("--l1_loss", default=0, type=float,
-                        help='The L1 feature loss strenght (Def 0.)')
+                        help='The L1 feature loss strength (Def 0.)')
     parser.add_argument("--cos_loss", default=0, type=float,
-                        help='The feature loss strenght (Def 0.)')
+                        help='The feature loss strength (Def 0.)')
 
     parser.add_argument("--train_only_classifier", action='store_true', default=False,
                         help="Freeze body and head of network (default: False)")

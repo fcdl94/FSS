@@ -2,7 +2,7 @@ from .segmentation_module import make_model
 from .trainer import Trainer
 from .imprinting import *
 
-methods = {"FT", "SPN", "COS", "WI", 'DWI', 'WM', "AMP", "WG", "GIFS"}
+methods = {"FT", "SPN", "COS", "WI", 'DWI', 'WM', "AMP", "WG", "GIFS", "LWF", "MIB", "ILT"}
 
 
 def get_method(opts, task, device, logger):

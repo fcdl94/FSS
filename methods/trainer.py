@@ -2,7 +2,8 @@ import torch
 from torch import distributed
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel
-from utils.loss import HardNegativeMining, FocalLoss, KnowledgeDistillationLoss, CosineLoss
+from utils.loss import HardNegativeMining, FocalLoss, KnowledgeDistillationLoss, CosineLoss, \
+    UnbiasedKnowledgeDistillationLoss, UnbiasedCrossEntropy
 from .segmentation_module import make_model
 from modules.classifier import IncrementalClassifier, CosineClassifier, SPNetClassifier
 from .utils import get_scheduler, get_batch, MeanReduction
@@ -16,7 +17,7 @@ class Trainer:
         self.opts = opts
         self.novel_classes = self.task.get_n_classes()[-1]
         self.step = task.step
-        self.need_model_old = task.step > 0 and (opts.loss_kd > 0 or opts.l2_loss > 0 or opts.l1_loss > 0 or opts.cos_loss > 0)
+        self.need_model_old = task.step > 0 and (opts.mib_kd > 0 or opts.loss_kd > 0 or opts.l2_loss > 0 or opts.l1_loss > 0 or opts.cos_loss > 0)
 
         self.n_channels = -1  # features size, will be initialized in make model
         self.model = self.make_model()
@@ -61,22 +62,48 @@ class Trainer:
         reduction = 'none'
         if opts.focal:
             self.criterion = FocalLoss(ignore_index=255, reduction=reduction)
+        elif opts.mib_ce:
+            self.criterion = UnbiasedCrossEntropy(old_cl=len(self.task.get_old_labels()),
+                                                  ignore_index=255, reduction=reduction)
         else:
             self.criterion = nn.CrossEntropyLoss(ignore_index=255, reduction=reduction)
 
         self.reduction = HardNegativeMining() if opts.hnm else MeanReduction()
 
-        self.l2_loss = opts.l2_loss
-        self.l2_criterion = nn.MSELoss() if task.step > 0 and opts.l2_loss > 0 else None
+        # Feature distillation
+        if task.step > 0 and (opts.l2_loss > 0 or opts.cos_loss > 0 or opts.l1_loss > 0):
+            assert self.model_old is not None, "Error, model old is None but distillation specified"
+            if opts.l2_loss > 0:
+                self.feat_loss = opts.l2_loss
+                self.feat_criterion = nn.MSELoss()
+            elif opts.l1_loss > 0:
+                self.feat_loss = opts.l1_loss
+                self.feat_criterion = nn.L1Loss()
+            elif opts.cos_loss > 0:
+                self.feat_loss = opts.cos_loss
+                self.feat_criterion = CosineLoss()
+        else:
+            self.feat_criterion = None
 
-        self.cos_loss = opts.cos_loss
-        self.cos_criterion = CosineLoss() if task.step > 0 and opts.cos_loss > 0 else None
+        # Output distillation
+        if task.step > 0 and (opts.loss_kd > 0 or opts.mib_kd > 0):
+            assert self.model_old is not None, "Error, model old is None but distillation specified"
+            if opts.loss_kd > 0:
+                self.kd_loss = opts.loss_kd
+                self.kd_criterion = KnowledgeDistillationLoss(reduction="mean")
+            if opts.mib_kd > 0:
+                self.kd_loss = opts.mib_kd
+                self.kd_criterion = UnbiasedKnowledgeDistillationLoss(reduction="mean")
+        else:
+            self.kd_criterion = None
 
-        self.kd_loss = opts.loss_kd
-        self.kd_criterion = KnowledgeDistillationLoss(reduction="mean") if task.step > 0 and opts.loss_kd > 0 else None
-
-        self.l1_loss = opts.l1_loss
-        self.l1_criterion = nn.L1Loss() if task.step > 0 and opts.l1_loss > 0 else None
+        # Body distillation
+        if task.step > 0 and opts.loss_de > 0:
+            assert self.model_old is not None, "Error, model old is None but distillation specified"
+            self.de_loss = opts.loss_de
+            self.de_criterion = nn.MSELoss()
+        else:
+            self.de_criterion = None
 
         self.initialize(opts)  # setup the model, optimizer, scheduler and criterion
 
@@ -111,7 +138,22 @@ class Trainer:
         return cls, n_feat
 
     def initialize(self, opts):
-        pass
+        if opts.init_mib and opts.method == "FT":
+            device = self.device
+            model = self.model.module if self.distributed else self.model
+
+            classifier = model.cls
+            imprinting_w = classifier.cls[0].weight[0]
+            bkg_bias = classifier.cls[0].bias[0]
+
+            bias_diff = torch.log(torch.FloatTensor([self.task.get_n_classes()[-1] + 1])).to(device)
+
+            new_bias = (bkg_bias - bias_diff)
+
+            classifier.cls[-1].weight.data.copy_(imprinting_w)
+            classifier.cls[-1].bias.data.copy_(new_bias)
+
+            classifier.cls[0].bias[0].data.copy_(new_bias.squeeze(0))
 
     def warm_up(self, dataset, epochs=1):
         pass
@@ -152,23 +194,20 @@ class Trainer:
 
                 rloss = torch.tensor([0.]).to(self.device)
                 optim.zero_grad()
-                outputs, feat = model(images, return_feat=True)
+                outputs, feat, body = model(images, return_feat=True, return_body=True)
 
                 # xxx Distillation/Regularization Losses
                 if self.model_old is not None:
-                    outputs_old, feat_old = self.model_old(images, return_feat=True)
-                    if self.kd_loss:
+                    outputs_old, feat_old, body_old = self.model_old(images, return_feat=True, return_body=True)
+                    if self.kd_criterion is not None:
                         kd_loss = self.kd_loss * self.kd_criterion(outputs, outputs_old)
                         rloss += kd_loss
-                    if self.l2_criterion is not None:
-                        l2_loss = self.l2_loss * self.l2_criterion(feat, feat_old)
-                        rloss += l2_loss
-                    if self.l1_criterion is not None:
-                        l1_loss = self.l1_loss * self.l1_criterion(feat, feat_old)
-                        rloss += l1_loss
-                    if self.cos_criterion is not None:
-                        cos_loss = self.cos_loss * self.cos_criterion(feat, feat_old)
-                        rloss += cos_loss
+                    if self.feat_criterion is not None:
+                        feat_loss = self.feat_loss * self.feat_criterion(feat, feat_old)
+                        rloss += feat_loss
+                    if self.de_criterion is not None:
+                        de_loss = self.de_loss * self.de_criterion(feat, feat_old)
+                        rloss += de_loss
 
                 loss = self.reduction(criterion(outputs, labels), labels)
 

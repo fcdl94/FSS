@@ -94,10 +94,13 @@ class Logger:
 
     def log_results(self, task, name, results, novel=False):
         if self.rank == 0:
-            file_name = f"{task.dataset}-{task.task}-{self.step}.csv"
+            file_name = f"{task.task}.csv"
             file_name = file_name if not novel else f"{file_name}_novel.csv"
-            path = f"{self.logdir_results}/{file_name}"
-            text = [str(round(time.time())), name, str(task.nshot), str(task.ishot)]
+            dir_path = f"{self.logdir_results}/{task.dataset}"
+            path = f"{dir_path}/{file_name}"
+            if not os.path.exists(dir_path):
+                os.makedirs(dir_path, exist_ok=True)
+            text = [str(round(time.time())), name, str(self.step), str(task.nshot), str(task.ishot)]
             for val in results:
                 text.append(str(val))
             row = ",".join(text) + "\n"

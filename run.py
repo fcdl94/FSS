@@ -234,6 +234,7 @@ def main(opts):
     # xxx Test code!
     logger.info("*** Test the model on all seen classes...")
     test_dst_all, test_dst_novel = get_dataset(opts, task, train=False)
+    logger.info(f"Dataset: {opts.dataset}, Test set: {len(test_dst_all)}")
     # make data loader for all classes
     test_loader_all = data.DataLoader(test_dst_all, batch_size=1,
                                       sampler=DistributedSampler(test_dst_all, num_replicas=world_size, rank=rank),

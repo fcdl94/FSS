@@ -73,7 +73,7 @@ class SegmentationModule(nn.Module):
         self.head_channels = head_channels
         self.cls = classifier
 
-    def forward(self, x, use_classifier=True, return_feat=False):
+    def forward(self, x, use_classifier=True, return_feat=False, return_body=False):
 
         x_b = self.body(x)
         if isinstance(x_b, dict):
@@ -89,6 +89,8 @@ class SegmentationModule(nn.Module):
             sem_logits = out
 
         if return_feat:
+            if return_body:
+                return sem_logits, out, x_b
             return sem_logits, out
 
         return sem_logits
