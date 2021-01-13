@@ -218,9 +218,12 @@ class InPlaceABR(ABR):
             weight = self.weight * r
             bias = self.bias + self.weight * d
 
-        x, _, _ = in_funcs.inplace_abn(
+        x = in_funcs.inplace_abn(
             x, weight, bias, self.running_mean, self.running_var, self.training, self.momentum, self.eps,
             self.activation, self.activation_param)
+
+        if isinstance(x, tuple) or isinstance(x, list): # to be compatible with inplace version < 1.0
+            x = x[0]
 
         return x
 

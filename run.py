@@ -79,9 +79,16 @@ def log_samples(logger, ret_samples, denorm, label2color, cur_epoch):
 
 def main(opts):
     distributed.init_process_group(backend='nccl', init_method='env://')
-    device_id, device = opts.local_rank, torch.device(opts.local_rank)
+    if opts.device is not None:
+        device_id = opts.device
+    else:
+        device_id = opts.local_rank
+    device = torch.device(device_id)
     rank, world_size = distributed.get_rank(), distributed.get_world_size()
-    torch.cuda.set_device(device_id)
+    if opts.device is not None:
+        torch.cuda.set_device(opts.device)
+    else:
+        torch.cuda.set_device(device_id)
 
     task = Task(opts)
 
