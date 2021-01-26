@@ -8,6 +8,7 @@ from .segmentation_module import make_model
 from modules.classifier import IncrementalClassifier, CosineClassifier, SPNetClassifier
 from .utils import get_scheduler, get_batch, MeanReduction
 
+CLIP = 10
 
 class Trainer:
     def __init__(self, task, device, logger, opts):
@@ -211,10 +212,13 @@ class Trainer:
 
                 loss = self.reduction(criterion(outputs, labels), labels)
 
-                loss_tot = loss + rloss
-                assert not torch.isnan(loss_tot), "Error, loss is NaN!"
-                loss_tot.backward()
+                if rloss <= CLIP:
+                    loss_tot = loss + rloss
+                else:
+                    print(f"Warning, rloss is {rloss}! Term ignored Skipped")
+                    loss_tot = loss
 
+                loss_tot.backward()
                 optim.step()
                 scheduler.step()
 
