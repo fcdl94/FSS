@@ -97,9 +97,8 @@ class Trainer:
             self.feat_criterion = None
 
         # Output distillation
-        self.it_kd = opts.iterative_kd
         if task.step > 0 and (opts.loss_kd > 0 or opts.mib_kd > 0):
-            assert self.model_old is not None and not self.it_kd, "Error, model old is None but distillation specified"
+            assert self.model_old is not None, "Error, model old is None but distillation specified"
             if opts.loss_kd > 0:
                 self.kd_criterion = KnowledgeDistillationLoss(reduction="mean", kl=opts.kl_div)
                 self.kd_loss = opts.loss_kd
