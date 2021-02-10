@@ -165,7 +165,7 @@ def main(opts):
     if opts.ckpt is not None:
         assert os.path.isfile(opts.ckpt), "Error, ckpt not found. Check the correct directory"
         checkpoint = torch.load(opts.ckpt, map_location="cpu")
-        cur_epoch = checkpoint["epoch"] + 1
+        cur_epoch = checkpoint["epoch"] + 1 if not opts.born_again else 0
         model.load_state_dict(checkpoint["model_state"])
         logger.info("[!] Model restored from %s" % opts.ckpt)
         del checkpoint

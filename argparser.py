@@ -32,6 +32,10 @@ def modify_command_options(opts):
         opts.loss_kd = 10 if opts.loss_kd == 0 else opts.loss_kd
         opts.loss_de = 10 if opts.loss_de == 0 else opts.loss_de
         opts.method = "FT"
+    elif opts.method == 'RT':
+        opts.train_only_novel = True
+        opts.method = "FT"
+        opts.lr_cls = 10
 
     if opts.train_only_classifier or opts.train_only_novel:
         opts.freeze = True
@@ -189,17 +193,21 @@ def get_argparser():
                         help='The L1 feature loss strength (Def 0.)')
     parser.add_argument("--cos_loss", default=0, type=float,
                         help='The feature loss strength (Def 0.)')
+    parser.add_argument("--kl_div", default=False, action='store_true',
+                        help='Use true KL loss and not the CE loss.')
+    parser.add_argument("--dist_warm_start", default=False, action='store_true',
+                        help='Use warm start for distillation.')
+    parser.add_argument("--born_again", default=False, action='store_true',
+                        help='Use born again strategy (use --ckpt as model old).')
 
     parser.add_argument("--train_only_classifier", action='store_true', default=False,
                         help="Freeze body and head of network (default: False)")
     parser.add_argument("--train_only_novel", action='store_true', default=False,
                         help="Train only the classifier of current step (default: False)")
     parser.add_argument("--bn_momentum", default=None, type=float,
-                        help="The BN momentum (Set to 0 to avoid update of running stats.)")
+                        help="The BN momentum (Set to 0.1 to update of running stats of ABR.)")
 
     # to remove
-    parser.add_argument("--strong_scale", action='store_true', default=False,
-                        help="Use strong scale augmentation (default: False)")
     parser.add_argument("--pixel_imprinting", action='store_true', default=False,
                         help="Use only a pixel for imprinting when with WI (default: False)")
     parser.add_argument("--weight_mix", action='store_true', default=False,

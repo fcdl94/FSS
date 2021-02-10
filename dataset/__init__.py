@@ -2,9 +2,11 @@ from .voc import VOCFSSDataset, VOCSegmentation
 from .cityscapes import CityscapesFSSDataset
 from .coco import COCOFSS, COCO, COCOStuffFSS
 from .ade import AdeSegmentation
-from .transform import Compose, RandomScale, RandomCrop, RandomHorizontalFlip, ToTensor, Normalize, CenterCrop, Resize
+from .transform import Compose, RandomScale, RandomCrop, RandomHorizontalFlip, ToTensor, Normalize, \
+    CenterCrop, Resize, RandomResizedCrop, ColorJitter
 import random
 from .utils import Subset, MyImageFolder, RandomDataset
+
 TRAIN_CV = 0.8
 
 
@@ -40,9 +42,9 @@ def get_dataset(opts, task, train=True):
                 dataset = COCOStuffFSS
             else:
                 dataset = COCOFSS
-        scale = RandomScale((0.5, 2)) if not opts.strong_scale else RandomScale((0.5, 4))
+
         train_transform = Compose([
-            scale,
+            RandomScale((0.5, 2)),
             RandomCrop(opts.crop_size, pad_if_needed=True),
             RandomHorizontalFlip(),
             ToTensor(),

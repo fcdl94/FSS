@@ -7,8 +7,10 @@ from utils.loss import HardNegativeMining, FocalLoss, KnowledgeDistillationLoss,
 from .segmentation_module import make_model
 from modules.classifier import IncrementalClassifier, CosineClassifier, SPNetClassifier
 from .utils import get_scheduler, get_batch, MeanReduction
+import copy
 
 CLIP = 10
+
 
 class Trainer:
     def __init__(self, task, device, logger, opts):
@@ -18,26 +20,34 @@ class Trainer:
         self.opts = opts
         self.novel_classes = self.task.get_n_classes()[-1]
         self.step = task.step
-        self.need_model_old = task.step > 0 and (opts.mib_kd > 0 or opts.loss_kd > 0 or opts.l2_loss > 0 or opts.l1_loss > 0 or opts.cos_loss > 0)
+
+        self.need_model_old = (opts.born_again or opts.mib_kd > 0 or opts.loss_kd > 0 or
+                               opts.l2_loss > 0 or opts.l1_loss > 0 or opts.cos_loss > 0)
 
         self.n_channels = -1  # features size, will be initialized in make model
         self.model = self.make_model()
         self.model = self.model.to(device)
         self.distributed = False
         self.model_old = None
-        if self.need_model_old:
-            self.model_old = self.make_model(is_old=True)
-            # put the old model into distributed memory and freeze it
-            for par in self.model_old.parameters():
-                par.requires_grad = False
-            self.model_old.to(device)
-            self.model_old.eval()
 
         if opts.fix_bn:
             self.model.fix_bn()
 
         if opts.bn_momentum is not None:
             self.model.bn_set_momentum(opts.bn_momentum)
+
+        self.initialize(opts)  # initialize model parameters (e.g. perform WI)
+
+        self.born_again = opts.born_again
+        self.dist_warm_start = opts.dist_warm_start
+        model_old_as_new = opts.born_again or opts.dist_warm_start
+        if self.need_model_old:
+            self.model_old = self.make_model(is_old=not model_old_as_new)
+            # put the old model into distributed memory and freeze it
+            for par in self.model_old.parameters():
+                par.requires_grad = False
+            self.model_old.to(device)
+            self.model_old.eval()
 
         # xxx Set up optimizer
         params = []
@@ -87,11 +97,12 @@ class Trainer:
             self.feat_criterion = None
 
         # Output distillation
+        self.it_kd = opts.iterative_kd
         if task.step > 0 and (opts.loss_kd > 0 or opts.mib_kd > 0):
-            assert self.model_old is not None, "Error, model old is None but distillation specified"
+            assert self.model_old is not None and not self.it_kd, "Error, model old is None but distillation specified"
             if opts.loss_kd > 0:
+                self.kd_criterion = KnowledgeDistillationLoss(reduction="mean", kl=opts.kl_div)
                 self.kd_loss = opts.loss_kd
-                self.kd_criterion = KnowledgeDistillationLoss(reduction="mean")
             if opts.mib_kd > 0:
                 self.kd_loss = opts.mib_kd
                 self.kd_criterion = UnbiasedKnowledgeDistillationLoss(reduction="mean")
@@ -105,8 +116,6 @@ class Trainer:
             self.de_criterion = nn.MSELoss()
         else:
             self.de_criterion = None
-
-        self.initialize(opts)  # setup the model, optimizer, scheduler and criterion
 
     def make_model(self, is_old=False):
         classifier, self.n_channels = self.get_classifier(is_old)
@@ -157,6 +166,12 @@ class Trainer:
             classifier.cls[0].bias[0].data.copy_(new_bias.squeeze(0))
 
     def warm_up(self, dataset, epochs=1):
+        self.warm_up_(dataset, epochs)
+        # warm start means make KD after weight imprinting or similar
+        if self.dist_warm_start:
+            self.model_old.load_state_dict(self.model.state_dict())
+
+    def warm_up_(self, dataset, epochs=1):
         pass
 
     def cool_down(self, dataset, epochs=1):
@@ -215,7 +230,7 @@ class Trainer:
                 if rloss <= CLIP:
                     loss_tot = loss + rloss
                 else:
-                    print(f"Warning, rloss is {rloss}! Term ignored Skipped")
+                    print(f"Warning, rloss is {rloss}! Term ignored")
                     loss_tot = loss
 
                 loss_tot.backward()
@@ -316,28 +331,32 @@ class Trainer:
 
     def load_state_dict(self, checkpoint, strict=True):
         state = {}
-        if (self.need_model_old and not strict) or not self.distributed:
+        if self.need_model_old or not self.distributed:
             for k, v in checkpoint["model"].items():
                 state[k[7:]] = v
-        state = state if not self.distributed else checkpoint['model']
 
-        if self.need_model_old and not strict:
-            self.model_old.load_state_dict(state, strict=True)  # we are loading the old model
+        model_state = state if not self.distributed else checkpoint['model']
 
-        if 'module.cls.class_emb' in state and not strict:  # if distributed
-            # remove from checkpoint since SPNClassifier is not incremental
-            del state['module.cls.class_emb']
+        if self.born_again and strict:
+            self.model_old.load_state_dict(state)
+            self.model.load_state_dict(model_state)
+        else:
+            if self.need_model_old and not strict:
+                self.model_old.load_state_dict(state, strict=not self.dist_warm_start)  # we are loading the old model
 
-        if 'cls.class_emb' in state and not strict:  # if not distributed
-            # remove from checkpoint since SPNClassifier is not incremental
-            del state['cls.class_emb']
+            if 'module.cls.class_emb' in state and not strict:  # if distributed
+                # remove from checkpoint since SPNClassifier is not incremental
+                del state['module.cls.class_emb']
 
-        model_state = state
-        self.model.load_state_dict(model_state, strict=strict)
+            if 'cls.class_emb' in state and not strict:  # if not distributed
+                # remove from checkpoint since SPNClassifier is not incremental
+                del state['cls.class_emb']
 
-        if strict:  # if strict, we are in ckpt (not step) so load also optim and scheduler
-            self.optimizer.load_state_dict(checkpoint["optimizer"])
-            self.scheduler.load_state_dict(checkpoint["scheduler"])
+            self.model.load_state_dict(model_state, strict=strict)
+
+            if not self.born_again and strict:  # if strict, we are in ckpt (not step) so load also optim and scheduler
+                self.optimizer.load_state_dict(checkpoint["optimizer"])
+                self.scheduler.load_state_dict(checkpoint["scheduler"])
 
     def state_dict(self):
         state = {"model": self.model.state_dict(), "optimizer": self.optimizer.state_dict(),

@@ -55,28 +55,30 @@ class EntropyLoss(nn.Module):
 
 
 class KnowledgeDistillationLoss(nn.Module):
-    def __init__(self, reduction='mean', alpha=1.):
+    def __init__(self, reduction='mean', kl=False, alpha=1.):
         super().__init__()
         self.reduction = reduction
         self.alpha = alpha
+        self.kl = kl
 
-    def forward(self, inputs, targets, mask=None):
+    def forward(self, inputs, targets):
         inputs = inputs.narrow(1, 0, targets.shape[1])
 
-        outputs = torch.log_softmax(inputs, dim=1)
-        labels = torch.softmax(targets * self.alpha, dim=1)
+        outputs = torch.log_softmax(inputs / self.alpha, dim=1)
+        labels = torch.softmax(targets / self.alpha, dim=1)
 
-        loss = (outputs * labels).mean(dim=1)
-
-        if mask is not None:
-            loss = loss * mask.float()
+        if not self.kl:
+            loss = -(outputs * labels).mean(dim=1)
+        else:
+            loss = F.kl_div(outputs, labels, reduction='none') * (self.alpha ** 2)
+            loss = loss.sum(dim=1)
 
         if self.reduction == 'mean':
-            outputs = -torch.mean(loss)  # torch.masked_select(loss, mask).mean()
+            outputs = torch.mean(loss)
         elif self.reduction == 'sum':
-            outputs = -torch.sum(loss)
+            outputs = torch.sum(loss)
         else:
-            outputs = -loss
+            outputs = loss
 
         return outputs
 

@@ -19,7 +19,7 @@ class AMP(Trainer):
         super(AMP, self).initialize(opts)
         self.amp_alpha = opts.amp_alpha
 
-    def warm_up(self, dataset, epochs=1):
+    def warm_up_(self, dataset, epochs=1):
         model = self.model.module if self.distributed else self.model
         model.eval()
         classes = len(self.task.order)
@@ -60,7 +60,7 @@ class WeightImprinting(Trainer):
             self.normalize_weight = False
             self.compute_score = False
 
-    def warm_up(self, dataset, epochs=5):
+    def warm_up_(self, dataset, epochs=5):
         model = self.model.module if self.distributed else self.model
         model.eval()
         classes = self.task.get_n_classes()
@@ -122,7 +122,7 @@ class WeightImprinting(Trainer):
 class WeightMixing(Trainer):
     use_bkg = False
 
-    def warm_up(self, dataset, epochs=1):
+    def warm_up_(self, dataset, epochs=1):
         model = self.model.module if self.distributed else self.model
         model.eval()
         start_from = 0 if WeightMixing.use_bkg else 1
@@ -158,16 +158,49 @@ class WeightMixing(Trainer):
 
 
 class DynamicWI(Trainer):
-    LR = 0.01
-    ITER = 500
-    BATCH_SIZE = 10
-    EPISODE = 5
+    LR = 1
+    ITER = 200
+    BATCH_SIZE = 5
+    EPISODE = 2
 
     def __init__(self, task, device, logger, opts):
         super(DynamicWI, self).__init__(task, device, logger, opts)
-        self.weight = nn.Parameter(F.normalize(torch.ones((self.n_channels, 1, 1), device=self.device), dim=0))
+        self.dim = self.n_channels
 
-    def warm_up(self, dataset, epochs=1):
+        self.weights = nn.Module()
+        self.weight_a = nn.Parameter(F.normalize(torch.ones((self.n_channels, 1, 1), device=self.device), dim=0))
+        self.weights.register_parameter("weight_a", self.weight_a)
+
+        self.weight_b = nn.Parameter(F.normalize(torch.ones((self.n_channels, 1, 1), device=self.device), dim=0))
+        self.weights.register_parameter("weight_b", self.weight_b)
+
+        self.keys = nn.Parameter(torch.randn(self.task.get_n_classes()[0], self.n_channels))
+        self.weights.register_parameter("keys", self.keys)
+
+        self.att_weight = nn.Parameter(torch.randn(self.n_channels, self.n_channels))
+        self.weights.register_parameter("att_weight", self.att_weight)
+
+        self.use_attention = True
+
+    def compute_weight(self, inp, cls_weight):
+        # input is a D dimensional prototype
+        if self.use_attention:
+            sum_weight = torch.zeros(self.dim, 1, 1)
+            count_weight = 0
+            for x in inp:
+                x = self.att_weight @ x  # DxD x D = DxD
+                x = x / x.norm(dim=1)
+                keys = self.keys / self.keys.norm(dim=1)  # CxD
+                x = (keys @ x).softmax(dim=0)  # C
+                sum_weight += (x.view(-1, 1, 1, 1) * cls_weight).sum(dim=0)
+                count_weight += 1
+            att_weight = sum_weight / count_weight
+            weight = self.weight_a * inp.mean(dim=0) + self.weight_b * att_weight
+        else:
+            weight = self.weight_a * inp.mean(dim=0)
+        return weight
+
+    def warm_up_(self, dataset, epochs=1):
         model = self.model.module if self.distributed else self.model
         model.eval()
         classes = self.task.get_n_classes()
@@ -178,12 +211,19 @@ class DynamicWI(Trainer):
         for c in new_classes:
             ds = dataset.get_k_image_of_class(cl=c, k=self.task.nshot)  # get K images of class c
             wc = get_prototype(model, ds, c, self.device)
+            weight = None
             count = 0
             while wc is None and count < 10:
                 ds = dataset.get_k_image_of_class(cl=c, k=self.task.nshot)  # get K images of class c
-                wc = get_prototype(model, ds, c, self.device)
+                wc = get_prototype(model, ds, c, self.device, return_all=False)
+                if wc is not None:
+                    weight = self.compute_weight(wc, model.cls.cls[0].weight[1:])
                 count += 1
-            model.cls.imprint_weights_class(F.normalize(self.weight * wc.view(self.n_channels, 1, 1), dim=0), c)
+
+            if weight is not None:
+                model.cls.imprint_weights_class(weight, c)
+            else:
+                raise Exception(f"Unable to imprint weight of class {c} after {count} trials.")
 
     def cool_down(self, dataset, epochs=1):
         if self.step == 0:
@@ -200,8 +240,7 @@ class DynamicWI(Trainer):
             # instance optimizer, criterion and data
             classes = np.arange(0, self.task.get_n_classes()[0])
             classes = classes[1:] if self.task.use_bkg else classes  # remove bkg if present
-            params = [  # {"params": model.cls.cls[0].weight, "lr": DynamicWI.LR*0.1},
-                {"params": self.weight, "lr": DynamicWI.LR}]
+            params = [{"params": model.cls.cls.parameters()}, {"params": self.weights.parameters()}]
             optimizer = torch.optim.SGD(params, lr=DynamicWI.LR)
             criterion = nn.CrossEntropyLoss(ignore_index=255, reduction='mean')
 
@@ -219,14 +258,16 @@ class DynamicWI(Trainer):
                     K = random.choice([1, 5, 10])
                     cls = random.choice(classes)  # sample N classes
                     for c in range(self.task.get_n_classes()[0]):
-                        wc = None
                         if c == cls:
-                            ds = dataset.get_k_image_of_class(cl=c, k=K)  # get K images of class c
-                            wc = get_prototype(self.model, ds, c, self.device)
-                        if wc is None:
-                            weight[c] = F.normalize(model.cls.cls[0].weight[c], dim=0)
+                            ds = dataset.get_k_image_of_class(cl=cls, k=K)  # get K images of class c
+                            wc = get_prototype(self.model, ds, cls, self.device, return_all=True)
+                            if wc is None:
+                                print("WC is None!!")
+                                weight[c] = F.normalize(model.cls.cls[0].weight[c], dim=0)
+                            else:
+                                weight[c] = F.normalize(self.compute_weight(wc, model.cls.cls[0].weight))
                         else:
-                            weight[c] = F.normalize(self.weight * wc.view(self.n_channels, 1, 1), dim=0)
+                            weight[c] = F.normalize(model.cls.cls[0].weight[c], dim=0)
 
                     # get a batch of images from dataloader
                     it, batch = get_batch(it, dataloader)
@@ -252,7 +293,7 @@ class DynamicWI(Trainer):
                 if (i % 50) == 0:
                     self.logger.info(f"Cool down loss at iter {i + 1}: {loss_tot / (i + 1)}")
 
-            self.logger.debug(self.weight)
+            #self.logger.debug(self.weight)
             state = {}
             for k, v in model.state_dict().items():
                 state["module." + k] = v
@@ -261,12 +302,13 @@ class DynamicWI(Trainer):
     def load_state_dict(self, checkpoint, strict=True):
         super().load_state_dict(checkpoint, strict)
         if self.step > 0:
-            device = self.weight.device
-            self.weight.data = checkpoint['weight'].to(device)
+            self.weights.load_state_dict(checkpoint['weights'])
+            self.weights.to(self.device)
 
     def state_dict(self):
         state = {"model": self.model.state_dict(), "optimizer": self.optimizer.state_dict(),
-                 "scheduler": self.scheduler.state_dict(), "weight": self.weight.data}
+                 "scheduler": self.scheduler.state_dict(),
+                 "weights": self.weights.state_dict()}
         return state
 
 
@@ -317,7 +359,7 @@ class WeightGenerator(Trainer):
 
         return w
 
-    def warm_up(self, dataset, epochs=1):
+    def warm_up_(self, dataset, epochs=1):
         self.train = False
         model = self.model.module if self.distributed else self.model
         model.eval()

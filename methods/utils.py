@@ -30,7 +30,7 @@ def get_batch(it, dataloader):
     return it, batch
 
 
-def get_prototype(model, ds, cl, device, interpolate_label=True):
+def get_prototype(model, ds, cl, device, interpolate_label=True, return_all=False):
     protos = []
     with torch.no_grad():
         for img, lbl in ds:
@@ -46,8 +46,11 @@ def get_prototype(model, ds, cl, device, interpolate_label=True):
             lbl = lbl.flatten()  # Now it is (HxW)
             if (lbl == cl).float().sum() > 0:
                 protos.append(norm_mean(out[lbl == cl, :]))
+
         if len(protos) > 0:
             protos = torch.cat(protos, dim=0)
+            if len(protos) > 1 and return_all:
+                return protos
             return protos.mean(dim=0)
         else:
             return None

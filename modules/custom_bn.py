@@ -124,7 +124,7 @@ class ABR(nn.Module):
     activation_param : float
         Negative slope for the `leaky_relu` activation.
     """
-    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True, activation="leaky_relu",
+    def __init__(self, num_features, eps=1e-5, momentum=0.0, affine=True, activation="leaky_relu",
                  activation_param=0.01, group=distributed.group.WORLD, renorm=True):
         super(ABR, self).__init__()
         self.num_features = num_features
@@ -146,8 +146,7 @@ class ABR(nn.Module):
         self.group = group
 
         self.renorm = renorm
-        if renorm:
-            self.momentum = 0.
+        self.momentum = momentum
 
     def reset_parameters(self):
         nn.init.constant_(self.running_mean, 0)
@@ -201,7 +200,7 @@ class ABR(nn.Module):
 
 
 class InPlaceABR(ABR):
-    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True, activation="leaky_relu",
+    def __init__(self, num_features, eps=1e-5, momentum=0.0, affine=True, activation="leaky_relu",
                  activation_param=0.01):
         super().__init__(num_features, eps, momentum, affine, activation, activation_param)
 
