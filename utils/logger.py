@@ -94,7 +94,7 @@ class Logger:
 
     def log_results(self, task, name, results, novel=False):
         if self.rank == 0:
-            file_name = f"{task.task}-n{task.nshot}.csv"
+            file_name = f"{task.task}-n{task.nshot}.csv" if task.nshot != -1 else f"{task.task}-0"
             file_name = file_name if not novel else f"{file_name}_novel.csv"
             dir_path = f"{self.logdir_results}/{task.dataset}"
             path = f"{dir_path}/{file_name}"

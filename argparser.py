@@ -43,7 +43,8 @@ def modify_command_options(opts):
 
     opts.no_cross_val = not opts.cross_val
     opts.pooling = round(opts.crop_size / opts.output_stride)
-    opts.crop_size_test = opts.crop_size if opts.crop_size_test is None else opts.crop_size_test
+    opts.crop_size_test = 500 if opts.dataset == "voc" else 640
+    opts.test_batch_size = 1
 
     return opts
 
@@ -206,6 +207,11 @@ def get_argparser():
                         help="Train only the classifier of current step (default: False)")
     parser.add_argument("--bn_momentum", default=None, type=float,
                         help="The BN momentum (Set to 0.1 to update of running stats of ABR.)")
+
+    parser.add_argument("--dyn_lr", default=1., type=float,
+                        help='LR for DynWI (Def 1)')
+    parser.add_argument("--dyn_iter", default=1000, type=int,
+                        help='Iterations for DynWI (Def 1000)')
 
     # to remove
     parser.add_argument("--pixel_imprinting", action='store_true', default=False,

@@ -3,7 +3,7 @@ from .cityscapes import CityscapesFSSDataset
 from .coco import COCOFSS, COCO, COCOStuffFSS
 from .ade import AdeSegmentation
 from .transform import Compose, RandomScale, RandomCrop, RandomHorizontalFlip, ToTensor, Normalize, \
-    CenterCrop, Resize, RandomResizedCrop, ColorJitter
+    CenterCrop, Resize, RandomResizedCrop, ColorJitter, PadCenterCrop
 import random
 from .utils import Subset, MyImageFolder, RandomDataset
 
@@ -53,13 +53,13 @@ def get_dataset(opts, task, train=True):
         ])
         val_transform = Compose([
             # Resize(size=opts.crop_size_test),
-            CenterCrop(size=opts.crop_size_test),
+            PadCenterCrop(size=opts.crop_size_test),
             ToTensor(),
             Normalize(mean=[0.485, 0.456, 0.406],
                       std=[0.229, 0.224, 0.225]),
         ])
         test_transform = Compose([
-            # Resize(size=opts.crop_size_test),
+            # PadCenterCrop(size=opts.crop_size_test),
             ToTensor(),
             Normalize(mean=[0.485, 0.456, 0.406],
                       std=[0.229, 0.224, 0.225]),

@@ -9,7 +9,7 @@ from modules.classifier import IncrementalClassifier, CosineClassifier, SPNetCla
 from .utils import get_scheduler, get_batch, MeanReduction
 import copy
 
-CLIP = 10
+CLIP = 100
 
 
 class Trainer:
@@ -49,6 +49,13 @@ class Trainer:
             self.model_old.to(device)
             self.model_old.eval()
 
+        # This should speed up training for few methods.
+        if opts.train_only_classifier or opts.train_only_novel:
+            for par in self.model.body.parameters():
+                par.requires_grad = False
+            for par in self.model.head.parameters():
+                par.requires_grad = False
+
         # xxx Set up optimizer
         params = []
         if not opts.freeze:
@@ -82,7 +89,7 @@ class Trainer:
         self.reduction = HardNegativeMining() if opts.hnm else MeanReduction()
 
         # Feature distillation
-        if task.step > 0 and (opts.l2_loss > 0 or opts.cos_loss > 0 or opts.l1_loss > 0):
+        if opts.l2_loss > 0 or opts.cos_loss > 0 or opts.l1_loss > 0:
             assert self.model_old is not None, "Error, model old is None but distillation specified"
             if opts.l2_loss > 0:
                 self.feat_loss = opts.l2_loss
@@ -97,7 +104,7 @@ class Trainer:
             self.feat_criterion = None
 
         # Output distillation
-        if task.step > 0 and (opts.loss_kd > 0 or opts.mib_kd > 0):
+        if opts.loss_kd > 0 or opts.mib_kd > 0:
             assert self.model_old is not None, "Error, model old is None but distillation specified"
             if opts.loss_kd > 0:
                 self.kd_criterion = KnowledgeDistillationLoss(reduction="mean", kl=opts.kl_div)
@@ -109,7 +116,7 @@ class Trainer:
             self.kd_criterion = None
 
         # Body distillation
-        if task.step > 0 and opts.loss_de > 0:
+        if opts.loss_de > 0:
             assert self.model_old is not None, "Error, model old is None but distillation specified"
             self.de_loss = opts.loss_de
             self.de_criterion = nn.MSELoss()

@@ -49,7 +49,7 @@ def get_prototype(model, ds, cl, device, interpolate_label=True, return_all=Fals
 
         if len(protos) > 0:
             protos = torch.cat(protos, dim=0)
-            if len(protos) > 1 and return_all:
+            if return_all:
                 return protos
             return protos.mean(dim=0)
         else:

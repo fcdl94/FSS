@@ -84,6 +84,43 @@ class Resize(object):
         return self.__class__.__name__ + '(size={0}, interpolation={1})'.format(self.size, interpolate_str)
 
 
+class PadCenterCrop(object):
+    def __init__(self, size, pad_if_needed=False, fill=0, padding_mode='constant'):
+        if isinstance(size, (int, float)):
+            self.size = (int(size), int(size))
+        else:
+            self.size = size
+        self.pad_if_needed = pad_if_needed
+        self.padding_mode = padding_mode
+        self.fill = fill
+
+    def __call__(self, img, lbl=None):
+
+        # pad the width if needed
+        if lbl is None:
+            if self.pad_if_needed and img.size[0] < self.size[1]:
+                img = F.pad(img, (self.size[1] - img.size[0], 0), self.fill, self.padding_mode)
+            # pad the height if needed
+            if self.pad_if_needed and img.size[1] < self.size[0]:
+                img = F.pad(img, (0, self.size[0] - img.size[1]), self.fill, self.padding_mode)
+
+            return F.center_crop(img, self.size)
+
+        else:
+            assert img.size == lbl.size, 'size of img and lbl should be the same. %s, %s' % (img.size, lbl.size)
+            # pad the width if needed
+            if self.pad_if_needed and img.size[0] < self.size[1]:
+                img = F.pad(img, (self.size[1] - img.size[0], 0), self.fill, self.padding_mode)
+                lbl = F.pad(lbl, (self.size[1] - lbl.size[0], 0), 255, self.padding_mode)
+
+            # pad the height if needed
+            if self.pad_if_needed and img.size[1] < self.size[0]:
+                img = F.pad(img, (0, self.size[0] - img.size[1]), self.fill, self.padding_mode)
+                lbl = F.pad(lbl, (0, self.size[0] - lbl.size[1]), 255, self.padding_mode)
+
+            return F.center_crop(img, self.size), F.center_crop(lbl, self.size)
+
+
 class CenterCrop(object):
     """Crops the given PIL Image at the center.
 

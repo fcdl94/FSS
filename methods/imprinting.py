@@ -10,7 +10,7 @@ import random
 from modules import DeeplabV3
 from .utils import get_batch, get_prototype, myReLU
 from utils.loss import HardNegativeMining
-
+import math
 
 class AMP(Trainer):
     EPOCHS = 5
@@ -158,10 +158,11 @@ class WeightMixing(Trainer):
 
 
 class DynamicWI(Trainer):
-    LR = 1
-    ITER = 200
-    BATCH_SIZE = 5
+
+    BATCH_SIZE = 4
     EPISODE = 2
+    LR = 0.
+    ITER = 10
 
     def __init__(self, task, device, logger, opts):
         super(DynamicWI, self).__init__(task, device, logger, opts)
@@ -174,30 +175,37 @@ class DynamicWI(Trainer):
         self.weight_b = nn.Parameter(F.normalize(torch.ones((self.n_channels, 1, 1), device=self.device), dim=0))
         self.weights.register_parameter("weight_b", self.weight_b)
 
-        self.keys = nn.Parameter(torch.randn(self.task.get_n_classes()[0], self.n_channels))
+        self.keys = nn.Parameter(torch.FloatTensor(self.task.get_n_classes()[0], self.n_channels).normal_(0.,  math.sqrt(2/self.dim)))
         self.weights.register_parameter("keys", self.keys)
 
-        self.att_weight = nn.Parameter(torch.randn(self.n_channels, self.n_channels))
-        self.weights.register_parameter("att_weight", self.att_weight)
+        self.att_weight = nn.Linear(self.dim, self.dim)
+        self.att_weight.weight.data.copy_(torch.eye(self.dim, self.dim) + torch.randn(self.dim, self.dim) * 0.001)
+        self.att_weight.bias.data.zero_()
+        self.weights.add_module("att_weight", self.att_weight)
+
+        self.weights.to(self.device)
 
         self.use_attention = True
+
+        DynamicWI.LR = opts.dyn_lr
+        DynamicWI.ITER = opts.dyn_iter
 
     def compute_weight(self, inp, cls_weight):
         # input is a D dimensional prototype
         if self.use_attention:
-            sum_weight = torch.zeros(self.dim, 1, 1)
+            sum_weight = torch.zeros(self.dim, 1, 1).to(self.device)
             count_weight = 0
             for x in inp:
-                x = self.att_weight @ x  # DxD x D = DxD
-                x = x / x.norm(dim=1)
-                keys = self.keys / self.keys.norm(dim=1)  # CxD
+                x = self.weights.att_weight(x)  # DxD x D = DxD
+                x = x / x.norm()
+                keys = self.weights.keys / self.weights.keys.norm(dim=1, keepdim=True)  # CxD
                 x = (keys @ x).softmax(dim=0)  # C
                 sum_weight += (x.view(-1, 1, 1, 1) * cls_weight).sum(dim=0)
                 count_weight += 1
             att_weight = sum_weight / count_weight
-            weight = self.weight_a * inp.mean(dim=0) + self.weight_b * att_weight
+            weight = self.weights.weight_a * inp.mean(dim=0).view(-1, 1, 1) + self.weights.weight_b * att_weight
         else:
-            weight = self.weight_a * inp.mean(dim=0)
+            weight = self.weights.weight_a * inp.mean(dim=0).view(-1, 1, 1)
         return weight
 
     def warm_up_(self, dataset, epochs=1):
@@ -209,15 +217,13 @@ class DynamicWI(Trainer):
             old_classes += c
         new_classes = np.arange(old_classes, old_classes + classes[-1])
         for c in new_classes:
-            ds = dataset.get_k_image_of_class(cl=c, k=self.task.nshot)  # get K images of class c
-            wc = get_prototype(model, ds, c, self.device)
             weight = None
             count = 0
-            while wc is None and count < 10:
+            while weight is None and count < 10:
                 ds = dataset.get_k_image_of_class(cl=c, k=self.task.nshot)  # get K images of class c
-                wc = get_prototype(model, ds, c, self.device, return_all=False)
+                wc = get_prototype(model, ds, c, self.device, return_all=True)
                 if wc is not None:
-                    weight = self.compute_weight(wc, model.cls.cls[0].weight[1:])
+                    weight = self.compute_weight(wc, model.cls.cls[0].weight)
                 count += 1
 
             if weight is not None:
@@ -239,7 +245,7 @@ class DynamicWI(Trainer):
             model.eval()
             # instance optimizer, criterion and data
             classes = np.arange(0, self.task.get_n_classes()[0])
-            classes = classes[1:] if self.task.use_bkg else classes  # remove bkg if present
+            classes = classes[1:]  # remove bkg ONLY from sampling
             params = [{"params": model.cls.cls.parameters()}, {"params": self.weights.parameters()}]
             optimizer = torch.optim.SGD(params, lr=DynamicWI.LR)
             criterion = nn.CrossEntropyLoss(ignore_index=255, reduction='mean')
@@ -255,17 +261,18 @@ class DynamicWI(Trainer):
 
                 for e in range(DynamicWI.EPISODE):
                     weight = torch.zeros_like(model.cls.cls[0].weight)
-                    K = random.choice([1, 5, 10])
+                    K = random.choice([1, 2, 5])
                     cls = random.choice(classes)  # sample N classes
                     for c in range(self.task.get_n_classes()[0]):
                         if c == cls:
                             ds = dataset.get_k_image_of_class(cl=cls, k=K)  # get K images of class c
                             wc = get_prototype(self.model, ds, cls, self.device, return_all=True)
                             if wc is None:
-                                print("WC is None!!")
+                                # print("WC is None!!")
                                 weight[c] = F.normalize(model.cls.cls[0].weight[c], dim=0)
                             else:
-                                weight[c] = F.normalize(self.compute_weight(wc, model.cls.cls[0].weight))
+                                class_weight = self.compute_weight(wc, model.cls.cls[0].weight)
+                                weight[c] = F.normalize(class_weight, dim=0)
                         else:
                             weight[c] = F.normalize(model.cls.cls[0].weight[c], dim=0)
 
@@ -290,13 +297,16 @@ class DynamicWI(Trainer):
 
                 self.logger.add_scalar("loss_cool_down", loss_step / DynamicWI.EPISODE, i + 1)
                 loss_tot += loss_step / DynamicWI.EPISODE
-                if (i % 50) == 0:
-                    self.logger.info(f"Cool down loss at iter {i + 1}: {loss_tot / (i + 1)}")
+                if (i % 10) == 0:
+                    self.logger.info(f"Cool down loss at iter {i + 1}: {loss_tot / 10}")
+                    loss_tot = 0
 
-            #self.logger.debug(self.weight)
             state = {}
-            for k, v in model.state_dict().items():
-                state["module." + k] = v
+            if self.distributed:
+                for k, v in model.state_dict().items():
+                    state["module." + k] = v
+            else:
+                state = model.state_dict()
             self.model.load_state_dict(state)
 
     def load_state_dict(self, checkpoint, strict=True):
