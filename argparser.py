@@ -197,6 +197,8 @@ def get_argparser():
                         help='The feature loss strength (Def 0.)')
     parser.add_argument("--kl_div", default=False, action='store_true',
                         help='Use true KL loss and not the CE loss.')
+    parser.add_argument("--ckd", default=False, action='store_true',
+                        help='Use cosine KD loss and not the CE loss.')
     parser.add_argument("--dist_warm_start", default=False, action='store_true',
                         help='Use warm start for distillation.')
     parser.add_argument("--born_again", default=False, action='store_true',

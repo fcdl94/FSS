@@ -4,7 +4,7 @@ import torch.nn.functional as functional
 
 import inplace_abn
 from inplace_abn import InPlaceABNSync, InPlaceABN, ABN
-from modules.custom_bn import AIN, RandABN, RandInPlaceABNSync, ABR, InPlaceABR
+from modules.custom_bn import AIN, RandABN, RandInPlaceABNSync, ABR, InPlaceABR, InPlaceABR_R
 from functools import partial
 
 import models
@@ -22,6 +22,8 @@ def make_model(opts, cls=None, head_channels=None):
         norm = partial(ABR, activation="leaky_relu", activation_param=.01)
     elif opts.norm_act == 'iabr':
         norm = partial(InPlaceABR, activation="leaky_relu", activation_param=.01)
+    elif opts.norm_act == 'iabrr':
+        norm = partial(InPlaceABR_R, activation="leaky_relu", activation_param=.01)
     elif opts.norm_act == 'ain':
         norm = partial(AIN, activation="leaky_relu", activation_param=.01)
     elif opts.norm_act == 'rabn':

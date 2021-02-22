@@ -3,11 +3,10 @@ from torch import distributed
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel
 from utils.loss import HardNegativeMining, FocalLoss, KnowledgeDistillationLoss, CosineLoss, \
-    UnbiasedKnowledgeDistillationLoss, UnbiasedCrossEntropy
+    UnbiasedKnowledgeDistillationLoss, UnbiasedCrossEntropy, CosineKnowledgeDistillationLoss
 from .segmentation_module import make_model
 from modules.classifier import IncrementalClassifier, CosineClassifier, SPNetClassifier
-from .utils import get_scheduler, get_batch, MeanReduction
-import copy
+from .utils import get_scheduler, MeanReduction
 
 CLIP = 100
 
@@ -109,7 +108,10 @@ class Trainer:
         if opts.loss_kd > 0 or opts.mib_kd > 0:
             assert self.model_old is not None, "Error, model old is None but distillation specified"
             if opts.loss_kd > 0:
-                self.kd_criterion = KnowledgeDistillationLoss(reduction="mean", kl=opts.kl_div)
+                if opts.ckd:
+                    self.kd_criterion = CosineKnowledgeDistillationLoss(reduction='mean')
+                else:
+                    self.kd_criterion = KnowledgeDistillationLoss(reduction="mean", kl=opts.kl_div)
                 self.kd_loss = opts.loss_kd
             if opts.mib_kd > 0:
                 self.kd_loss = opts.mib_kd

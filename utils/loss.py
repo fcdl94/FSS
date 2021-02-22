@@ -54,6 +54,30 @@ class EntropyLoss(nn.Module):
         return -loss
 
 
+class CosineKnowledgeDistillationLoss(nn.Module):
+    def __init__(self, reduction='mean', norm='L2'):
+        super().__init__()
+        self.reduction = reduction
+        self.norm = norm.upper()
+
+    def forward(self, inputs, targets):
+        inputs = inputs.narrow(1, 0, targets.shape[1])
+
+        if self.norm == "L2":
+            loss = (inputs - targets).norm(dim=1) / inputs.shape[1]
+        else:
+            loss = (inputs - targets).mean(dim=1)
+
+        if self.reduction == 'mean':
+            outputs = torch.mean(loss)
+        elif self.reduction == 'sum':
+            outputs = torch.sum(loss)
+        else:
+            outputs = loss
+
+        return outputs
+
+
 class KnowledgeDistillationLoss(nn.Module):
     def __init__(self, reduction='mean', kl=False, alpha=1.):
         super().__init__()
