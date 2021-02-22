@@ -37,9 +37,10 @@ class StreamSegMetrics(_StreamMetrics):
     Stream Metrics for Semantic Segmentation Task
     """
 
-    def __init__(self, n_classes):
+    def __init__(self, n_classes, first_novel_class):
         super().__init__()
         self.n_classes = n_classes
+        self.first_novel_class = first_novel_class
         self.confusion_matrix = np.zeros((n_classes, n_classes))
         self.total_samples = 0
 
@@ -48,7 +49,7 @@ class StreamSegMetrics(_StreamMetrics):
             self.confusion_matrix += self._fast_hist(lt.flatten(), lp.flatten())
         self.total_samples += len(label_trues)
 
-    def to_str(self, results):
+    def to_str_verbose(self, results):
         string = "\n"
         ignore = ["Class IoU", "Class Acc", "Class Prec",
                   "Confusion Matrix Pred", "Confusion Matrix", "Confusion Matrix Text"]
@@ -70,6 +71,23 @@ class StreamSegMetrics(_StreamMetrics):
 
         return string
 
+    def to_str(self, results):
+        string = "\n"
+        ignore = ["Class IoU", "Class Acc", "Class Prec", "Agg",
+                  "Confusion Matrix Pred", "Confusion Matrix", "Confusion Matrix Text"]
+        for k, v in results.items():
+            if k not in ignore:
+                string += "%s: %f\n" % (k, v)
+
+        i = 0
+        for name in ('Class IoU', 'Class Acc', 'Class Prec'):
+            string += f'{name}:\n'
+            string += f"\tB: {results['Agg'][i]}\n"
+            string += f"\tN: {results['Agg'][i+1]}\n"
+            i += 2
+
+        return string
+
     def _fast_hist(self, label_true, label_pred):
         mask = (label_true >= 0) & (label_true < self.n_classes)
         hist = np.bincount(
@@ -87,6 +105,7 @@ class StreamSegMetrics(_StreamMetrics):
         """
         EPS = 1e-6
         hist = self.confusion_matrix
+        first_novel_class = self.first_novel_class
 
         gt_sum = hist.sum(axis=1)
         mask = (gt_sum != 0)
@@ -106,6 +125,24 @@ class StreamSegMetrics(_StreamMetrics):
         cls_acc = dict(zip(range(self.n_classes), [acc_cls_c[i] if m else "X" for i, m in enumerate(mask)]))
         cls_prec = dict(zip(range(self.n_classes), [precision_cls_c[i] if m else "X" for i, m in enumerate(mask)]))
 
+        short_metrics = []
+        for metric in (cls_iu, cls_acc, cls_prec):
+            base_classes = 0.
+            novel_classes = 0.
+            for k, v in metric.items():
+                if v != "X":
+                    if k < first_novel_class:
+                        base_classes += v
+                    else:
+                        novel_classes += v
+
+            base = base_classes / first_novel_class
+            if (self.n_classes - first_novel_class) != 0:
+                novel = novel_classes / (self.n_classes - first_novel_class)
+            else:
+                novel = 0
+            short_metrics += [base, novel]
+
         return {
             "Total samples": self.total_samples,
             "Overall Acc": acc,
@@ -115,7 +152,8 @@ class StreamSegMetrics(_StreamMetrics):
             "Mean IoU": mean_iu,
             "Class IoU": cls_iu,
             "Class Acc": cls_acc,
-            "Class Prec": cls_prec
+            "Class Prec": cls_prec,
+            "Agg": short_metrics
         }
 
     def get_conf_matrixes(self):

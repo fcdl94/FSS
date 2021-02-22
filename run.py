@@ -180,8 +180,8 @@ def main(opts):
     denorm = utils.Denormalize(mean=[0.485, 0.456, 0.406],
                                std=[0.229, 0.224, 0.225])  # de-normalization for original images
 
-    train_metrics = StreamSegMetrics(len(task.get_order()))
-    val_metrics = StreamSegMetrics(len(task.get_order()))
+    train_metrics = StreamSegMetrics(len(task.get_order()), task.get_n_classes()[0])
+    val_metrics = StreamSegMetrics(len(task.get_order()), task.get_n_classes()[0])
     results = {}
 
     # check if random is equal here.
@@ -285,6 +285,7 @@ def main(opts):
     ret = val_score['Mean IoU']
 
     logger.log_results(task=task, name=opts.name, results=val_score['Class IoU'].values())
+    logger.log_aggregates(task=task, name=opts.name, results=val_score['Agg'])
 
     logger.close()
     return ret

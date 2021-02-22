@@ -107,6 +107,20 @@ class Logger:
             with open(path, "a") as file:
                 file.write(row)
 
+    def log_aggregates(self, task, name, results):
+        if self.rank == 0:
+            file_name = f"{task.task}-n{task.nshot}-agg.csv" if task.nshot != -1 else f"{task.task}-0-agg.csv"
+            dir_path = f"{self.logdir_results}/{task.dataset}"
+            path = f"{dir_path}/{file_name}"
+            if not os.path.exists(dir_path):
+                os.makedirs(dir_path, exist_ok=True)
+            text = [str(round(time.time())), name, str(self.step), str(task.nshot), str(task.ishot)]
+            for val in results:
+                text.append(str(val))
+            row = ",".join(text) + "\n"
+            with open(path, "a") as file:
+                file.write(row)
+
     def _transform_tag(self, tag):
         tag = tag + f"/{self.step}" if self.step is not None else tag
         return tag

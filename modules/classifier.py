@@ -34,10 +34,11 @@ class IncrementalClassifier(nn.Module):
         while cl >= self.classes[step]:
             cl -= self.classes[step]
             step += 1
-        if step == len(self.classes)-1:  # last step! alpha = 1
+        if step == len(self.classes) - 1:  # last step! alpha = 1
             alpha = 0
-        self.cls[step].weight.data[cl] = alpha*self.cls[step].weight.data[cl] + \
-                                         (1-alpha)*features.view_as(self.cls[step].weight.data[cl])
+        self.cls[step].weight.data[cl] = alpha * self.cls[step].weight.data[cl] + \
+                                         (1 - alpha) * features.view_as(self.cls[step].weight.data[cl])
+        self.cls[step].bias.data[cl] = 0.
 
 
 class CosineClassifier(nn.Module):

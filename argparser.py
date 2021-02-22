@@ -34,10 +34,11 @@ def modify_command_options(opts):
         opts.method = "FT"
     elif opts.method == 'RT':
         opts.train_only_novel = True
+        opts.train_only_classifier = True
         opts.method = "FT"
         opts.lr_cls = 10
 
-    if opts.train_only_classifier or opts.train_only_novel:
+    if opts.train_only_classifier:
         opts.freeze = True
         opts.lr_head = 0.
 

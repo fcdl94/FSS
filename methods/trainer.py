@@ -27,6 +27,8 @@ class Trainer:
         self.n_channels = -1  # features size, will be initialized in make model
         self.model = self.make_model()
         self.model = self.model.to(device)
+        for p in self.model.parameters():
+            p.register_hook(lambda grad: torch.clamp(grad, -CLIP, CLIP))
         self.distributed = False
         self.model_old = None
 
@@ -49,26 +51,26 @@ class Trainer:
             self.model_old.to(device)
             self.model_old.eval()
 
-        # This should speed up training for few methods.
-        if opts.train_only_classifier or opts.train_only_novel:
-            for par in self.model.body.parameters():
-                par.requires_grad = False
-            for par in self.model.head.parameters():
-                par.requires_grad = False
-
         # xxx Set up optimizer
+        self.train_only_novel = opts.train_only_novel
         params = []
         if not opts.freeze:
             params.append({"params": filter(lambda p: p.requires_grad, self.model.body.parameters())})
+        else:
+            for par in self.model.body.parameters():
+                par.requires_grad = False
 
         if opts.lr_head != 0:
             params.append({"params": filter(lambda p: p.requires_grad, self.model.head.parameters()),
                            'lr': opts.lr * opts.lr_head})
+        else:
+            for par in self.model.head.parameters():
+                par.requires_grad = False
 
         if opts.method != "SPN":
             if opts.train_only_novel:
                 params.append({"params": filter(lambda p: p.requires_grad, self.model.cls.cls[task.step].parameters()),
-                               'lr': opts.lr * opts.lr_cls})
+                              'lr': opts.lr * opts.lr_cls})
             else:
                 params.append({"params": filter(lambda p: p.requires_grad, self.model.cls.parameters()),
                                'lr': opts.lr * opts.lr_cls})
@@ -233,11 +235,11 @@ class Trainer:
 
                 loss = self.reduction(criterion(outputs, labels), labels)
 
-                if rloss <= CLIP:
-                    loss_tot = loss + rloss
-                else:
-                    print(f"Warning, rloss is {rloss}! Term ignored")
-                    loss_tot = loss
+                # if rloss <= CLIP:
+                loss_tot = loss + rloss
+                # else:
+                #     print(f"Warning, rloss is {rloss}! Term ignored")
+                #     loss_tot = loss
 
                 loss_tot.backward()
                 optim.step()

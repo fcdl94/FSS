@@ -2,16 +2,19 @@ from .segmentation_module import make_model
 from .trainer import Trainer
 from .imprinting import *
 
-methods = {"FT", "SPN", "COS", "WI", 'DWI', 'WM', "AMP", "WG", "GIFS", "LWF", "MIB", "ILT", "RT"}
+methods = {"FT", "SPN", "COS", "WI", 'DWI', 'WM', "AMP", "WG", "SWG", "GIFS", "LWF", "MIB", "ILT", "RT"}
 
 
 def get_method(opts, task, device, logger):
     if opts.method == 'WI':
         opts.method = 'COS'
         return WeightImprinting(task=task, device=device, logger=logger, opts=opts)
-    if opts.method == 'WG':
+    elif opts.method == 'WG':
         opts.method = 'COS'
-        return WeightGenerator(task=task, device=device, logger=logger, opts=opts)
+        return ContextWiseWeightImprinting(task=task, device=device, logger=logger, opts=opts)
+    elif opts.method == 'SWG':
+        opts.method = 'COS'
+        return SpatialWeightGenerator(task=task, device=device, logger=logger, opts=opts)
     elif opts.method == 'DWI':
         opts.method = 'COS'
         return DynamicWI(task=task, device=device, logger=logger, opts=opts)

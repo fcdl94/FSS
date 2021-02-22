@@ -1,7 +1,7 @@
 import utils
 import torch
 import torch.nn.functional as F
-
+import torch.nn as nn
 
 class MeanReduction:
     def __call__(self, x, target):
@@ -30,8 +30,9 @@ def get_batch(it, dataloader):
     return it, batch
 
 
-def get_prototype(model, ds, cl, device, interpolate_label=True, return_all=False):
+def get_prototype(model, ds, cl, device, interpolate_label=True, return_all=False, background=False):
     protos = []
+    bkg_proto = []
     with torch.no_grad():
         for img, lbl in ds:
             img, lbl = img.to(device), lbl.to(device)
@@ -44,14 +45,18 @@ def get_prototype(model, ds, cl, device, interpolate_label=True, return_all=Fals
             out = out.squeeze(0)
             out = out.view(out.shape[0], -1).t()  # (HxW) x F
             lbl = lbl.flatten()  # Now it is (HxW)
-            if (lbl == cl).float().sum() > 0:
+            if (lbl == cl).float().sum() > 0 and (lbl != cl).float().sum() > 0:
                 protos.append(norm_mean(out[lbl == cl, :]))
+                bkg_proto.append(norm_mean(out[lbl != cl, :]))
 
         if len(protos) > 0:
             protos = torch.cat(protos, dim=0)
+            bkg_proto = torch.cat(bkg_proto, dim=0)
+
             if return_all:
-                return protos
-            return protos.mean(dim=0)
+                return protos if not background else (protos, bkg_proto)
+
+            return protos.mean(dim=0) if not background else (protos.mean(dim=0), bkg_proto.mean(dim=0))
         else:
             return None
 
