@@ -124,7 +124,7 @@ class ABR(nn.Module):
     activation_param : float
         Negative slope for the `leaky_relu` activation.
     """
-    def __init__(self, num_features, eps=1e-5, momentum=0.0, affine=True, activation="leaky_relu",
+    def __init__(self, num_features, eps=1e-9, momentum=0.0, affine=True, activation="leaky_relu",
                  activation_param=0.01, group=distributed.group.WORLD, renorm=True):
         super(ABR, self).__init__()
         self.num_features = num_features
@@ -161,9 +161,9 @@ class ABR(nn.Module):
             bias = self.bias
         else:
             with torch.no_grad():
-                running_std = (self.running_var + self.eps).pow(0.5)
+                running_std = self.running_var.pow(0.5) + self.eps
                 xt = x.transpose(1, 0).reshape(x.shape[1], -1)
-                r = (xt.var(dim=1) + self.eps).pow(0.5) / running_std
+                r = xt.std(dim=1) / running_std
                 d = (xt.mean(dim=1) - self.running_mean) / running_std
             weight = self.weight * r
             bias = self.bias + self.weight*d
@@ -221,7 +221,37 @@ class InPlaceABR(ABR):
             x, weight, bias, self.running_mean, self.running_var, self.training, self.momentum, self.eps,
             self.activation, self.activation_param)
 
-        if isinstance(x, tuple) or isinstance(x, list): # to be compatible with inplace version < 1.0
+        if isinstance(x, tuple) or isinstance(x, list):  # to be compatible with inplace version < 1.0
+            x = x[0]
+
+        return x
+
+
+class InPlaceABR_R(ABR):
+    def __init__(self, num_features, eps=1e-5, momentum=0.0, affine=True, activation="leaky_relu",
+                 activation_param=0.01):
+        super().__init__(num_features, eps, momentum, affine, activation, activation_param)
+        self.alpha = 0.9
+
+    def forward(self, x):
+        if not self.renorm or not self.training:  # if eval, don't renorm
+            weight = self.weight
+            bias = self.bias
+        else:
+            with torch.no_grad():
+                running_std = (self.running_var + self.eps).pow(0.5)
+                xt = x.transpose(1, 0).reshape(x.shape[1], -1)
+                new_std = (1-self.alpha) * xt.var(dim=1) + self.alpha * running_std
+                r = (xt.var(dim=1) + self.eps).pow(0.5) / new_std
+                d = self.alpha * (xt.mean(dim=1) - self.running_mean) / new_std
+            weight = self.weight * r
+            bias = self.bias + self.weight * d
+
+        x = in_funcs.inplace_abn(
+            x, weight, bias, self.running_mean, self.running_var, self.training, self.momentum, self.eps,
+            self.activation, self.activation_param)
+
+        if isinstance(x, tuple) or isinstance(x, list):  # to be compatible with inplace version < 1.0
             x = x[0]
 
         return x

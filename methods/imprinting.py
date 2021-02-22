@@ -326,7 +326,7 @@ class ContextWiseWeightImprintingModule(nn.Module):
         super(ContextWiseWeightImprintingModule, self).__init__()
         self.dim = n_channels
         self.weight_c = nn.Parameter(F.normalize(torch.ones((self.dim, 1, 1)), dim=0))
-        self.weight_b = nn.Parameter(F.normalize(torch.randn((self.dim, 1, 1)), dim=0))
+        self.weight_b = nn.Parameter(-F.normalize(torch.ones((self.dim, 1, 1)), dim=0))
 
     def forward(self, cls_proto, bkg_proto):
         # input is a 2xD dimensional prototype
@@ -412,7 +412,7 @@ class ContextWiseWeightImprinting(Trainer):
                     for c in range(self.task.get_n_classes()[0]):
                         if c == cls:
                             ds = dataset.get_k_image_of_class(cl=cls, k=K)  # get K images of class c
-                            protos = get_prototype(self.model, ds, cls, self.device,
+                            protos = get_prototype(model, ds, cls, self.device,
                                                    interpolate_label=False, return_all=True, background=True)
                             if protos is None:
                                 # print("WC is None!!")
@@ -446,7 +446,7 @@ class ContextWiseWeightImprinting(Trainer):
 
                 self.logger.add_scalar("loss_cool_down", loss_step / self.EPISODE, i + 1)
                 loss_tot += loss_step / self.EPISODE
-                if (i % 10) == 0:
+                if ((i+1) % 10) == 0:
                     self.logger.info(f"Cool down loss at iter {i + 1}: {loss_tot / 10}")
                     loss_tot = 0
 
