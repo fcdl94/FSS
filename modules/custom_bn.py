@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as functional
 from inplace_abn import ABN, InPlaceABNSync, functions as in_funcs
 import torch.distributed as distributed
-
+from inplace_abn import _backend
 
 class AIN(nn.Module):
     """Activated Instance Normalization
@@ -200,7 +200,7 @@ class ABR(nn.Module):
 
 
 class InPlaceABR(ABR):
-    def __init__(self, num_features, eps=1e-5, momentum=0.0, affine=True, activation="leaky_relu",
+    def __init__(self, num_features, eps=1e-8, momentum=0.0, affine=True, activation="leaky_relu",
                  activation_param=0.01):
         super().__init__(num_features, eps, momentum, affine, activation, activation_param)
 
@@ -210,10 +210,10 @@ class InPlaceABR(ABR):
             bias = self.bias
         else:
             with torch.no_grad():
+                mean, var, count = _backend.statistics(x)
                 running_std = (self.running_var + self.eps).pow(0.5)
-                xt = x.transpose(1, 0).reshape(x.shape[1], -1)
-                r = (xt.var(dim=1) + self.eps).pow(0.5) / running_std
-                d = (xt.mean(dim=1) - self.running_mean) / running_std
+                r = (var + self.eps).pow(0.5) / running_std
+                d = (mean - self.running_mean) / running_std
             weight = self.weight * r
             bias = self.bias + self.weight * d
 

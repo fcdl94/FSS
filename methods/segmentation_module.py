@@ -75,27 +75,30 @@ class SegmentationModule(nn.Module):
         self.head_channels = head_channels
         self.cls = classifier
 
-    def forward(self, x, use_classifier=True, return_feat=False, return_body=False):
+    def forward(self, x, use_classifier=True, return_feat=False, return_body=False, only_classifier=False):
 
-        x_b = self.body(x)
-        if isinstance(x_b, dict):
-            x_b = x_b["out"]
-        out = self.head(x_b)
-
-        out_size = x.shape[-2:]
-
-        if use_classifier:
-            sem_logits = self.cls(out)
-            sem_logits = functional.interpolate(sem_logits, size=out_size, mode="bilinear", align_corners=False)
+        if only_classifier:
+            return self.cls(x)
         else:
-            sem_logits = out
+            x_b = self.body(x)
+            if isinstance(x_b, dict):
+                x_b = x_b["out"]
+            out = self.head(x_b)
 
-        if return_feat:
-            if return_body:
-                return sem_logits, out, x_b
-            return sem_logits, out
+            out_size = x.shape[-2:]
 
-        return sem_logits
+            if use_classifier:
+                sem_logits = self.cls(out)
+                sem_logits = functional.interpolate(sem_logits, size=out_size, mode="bilinear", align_corners=False)
+            else:
+                sem_logits = out
+
+            if return_feat:
+                if return_body:
+                    return sem_logits, out, x_b
+                return sem_logits, out
+
+            return sem_logits
 
     def freeze(self):
         for par in self.parameters():

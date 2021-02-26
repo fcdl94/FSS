@@ -11,163 +11,74 @@ from .utils import get_batch, get_prototype
 import math
 
 
-class AMP(Trainer):
-    EPOCHS = 5
-
-    def initialize(self, opts):
-        super(AMP, self).initialize(opts)
-        self.amp_alpha = opts.amp_alpha
+class WeightMixing(Trainer):
+    use_bkg = False
 
     def warm_up_(self, dataset, epochs=1):
         model = self.model.module if self.distributed else self.model
         model.eval()
-        classes = len(self.task.order)
-        sum_features = torch.zeros(classes, model.head_channels).to(self.device)
-        count_features = torch.zeros(classes).to(self.device)
-
-        for ep in range(AMP.EPOCHS):
-            with torch.no_grad():
-                for idx in range(len(dataset)):
-                    images, labels = dataset[idx]
-                    images = images.to(self.device, dtype=torch.float32)
-                    labels = labels.to(self.device, dtype=torch.long)
-                    out_size = images.shape[-2:]
-                    out = model(images.unsqueeze(0), use_classifier=False)
-                    out = F.interpolate(out, size=out_size, mode="bilinear", align_corners=False).squeeze_(0)
-                    cl = labels.unique().cpu().numpy()  # get list of classes
-                    for c in cl:
-                        if c != 255:
-                            feat = out[:, labels == c]  # F x P (pixels of class c)
-                            sum_features[c] += feat.mean(dim=1)  # F
-                            count_features[c] += 1
-        # we have finished computing features, now collect and imprint!
-        for c in range(classes):
-            if count_features[c] != 0:
-                features = sum_features[c] / count_features[c]
-                features = features / features.norm()
-                model.cls.imprint_weights_class(features=features, cl=c, alpha=self.amp_alpha)
-
-
-class WeightImprinting(Trainer):
-    def __init__(self, task, device, logger, opts):
-        super().__init__(task, device, logger, opts)
-        self.pixel = opts.pixel_imprinting
-        if opts.weight_mix:
-            self.normalize_weight = True
-            self.compute_score = True
-        else:
-            self.normalize_weight = False
-            self.compute_score = False
-
-    def warm_up_(self, dataset, epochs=5):
-        model = self.model.module if self.distributed else self.model
-        model.eval()
+        start_from = 0 if WeightMixing.use_bkg else 1
         classes = self.task.get_n_classes()
         old_classes = 0
         for c in classes[:-1]:
             old_classes += c
-        new_classes = np.arange(old_classes, old_classes + classes[-1])
-        sum_features = torch.zeros(classes[-1], model.head_channels).to(self.device)
-        oi_acc = torch.zeros(classes[-1], classes[0] - 1).to(self.device)
-        count = torch.zeros(classes[-1]).to(self.device)
-        for ep in range(epochs):
+        new_classes = list(range(old_classes, old_classes + classes[-1]))
+        for c in new_classes:
+            ds = dataset.get_k_image_of_class(cl=c, k=self.task.nshot)  # get K images of class c
+            images = [ds[i][0].unsqueeze(0) for i in range(len(ds))]
+            labels = [ds[i][1] for i in range(len(ds))]
             with torch.no_grad():
-                for idx in range(len(dataset)):
-                    images, labels = dataset[idx]
-                    images = images.to(self.device, dtype=torch.float32)
-                    labels = labels.to(self.device, dtype=torch.long)
-                    out = model(images.unsqueeze(0), use_classifier=False)  # .squeeze_(0)
-                    out_size = images.shape[-2:]
-                    out = F.interpolate(out, size=out_size, mode="bilinear", align_corners=False).squeeze_(0)
-                    # labels = F.interpolate(labels.float().view(1, 1, labels.shape[0], labels.shape[1]),
-                    #                        size=out.shape[-2:], mode="nearest").view(out.shape[-2:]).type(torch.uint8)
-                    cl = labels.unique().cpu().numpy()  # get list of classes
-                    for c in new_classes:
-                        if c in cl:
-                            feat = out[:, labels == c]  # F x P (pixels of class c)
-
-                            if self.compute_score:
-                                oi = model.cls.cls[0](out.unsqueeze(0)).squeeze(0)
-                                oi = oi[:, labels == c]  # get scores for pixels of c only -> oi has size C x P_c
-                                oi = oi[1:].softmax(dim=0)  # make softmax on base classes / bkg -> C_b x P_c
-                                oi_acc[c - old_classes] += oi.mean(dim=1)
-
-                            if self.pixel:
-                                feat = F.normalize(feat, dim=0).t()
-                                p = model.cls.cls[0].weight[0].view(1, 256).detach()
-                                # p = p / p.norm()
-                                bkg_score = -(feat * p).sum(dim=1)
-                                max_score, max_idx = bkg_score.max(dim=0)
-                                feat = feat[max_idx]
-                            else:
-                                feat = F.normalize(F.normalize(feat, dim=0).sum(dim=1), dim=0)
-                            sum_features[c - old_classes] += feat
-                            count[c - old_classes] += 1
-
-        # we have finished computing features, now collect and imprint!
-        assert torch.any(count != 0), "Error, a novel class has no pixels!"
-        features = F.normalize(sum_features, dim=1)
-        if self.normalize_weight:
-            if self.compute_score:
-                scores = oi_acc / count.view(-1, 1)
-                for c in range(classes[-1]):
-                    f = (model.cls.cls[0].weight[1:] * scores[c].view(classes[0] - 1, 1, 1, 1))
-                    features[c] += f.sum(dim=0).view(model.head_channels)
-            else:
-                features += model.cls.cls[0].weight[1:].mean(dim=0).view(-1).detach()
-        model.cls.imprint_weights_step(step=self.task.step, features=features)
+                out = []
+                for x in images:
+                    x = x.to(self.device)
+                    out.append(model(x).squeeze(0))
+                oi_acc = torch.zeros(classes[0] - start_from).to(self.device)
+                count = 0
+                for i in range(len(out)):
+                    labeli = labels[i].to(self.device)
+                    if (labeli == c).sum() == 0:
+                        continue
+                    oi = out[i][:, labeli == c]  # get scores for pixels of c only -> oi has size C x P_c
+                    oi = oi[start_from:classes[0]].softmax(dim=0)  # make softmax on base classes -> C_base x P_c
+                    oi_acc += oi.mean(dim=1)
+                    count += 1
+                old_class_score = oi_acc / count  # now we have mean over all images
+                new_weight = torch.zeros(self.n_channels).to(self.device)
+                for oc in range(start_from, classes[0]):  # for each old class oc
+                    new_weight += model.cls.cls[0].weight[oc].view(-1) * old_class_score[oc - start_from]
+                model.cls.imprint_weights_class(new_weight.view(self.n_channels, 1, 1), c)
 
 
-class DynamicWI(Trainer):
+class ContextWiseWeightImprintingModule(nn.Module):
+    def __init__(self, n_channels):
+        super(ContextWiseWeightImprintingModule, self).__init__()
+        self.dim = n_channels
+        self.weight_c = nn.Parameter(F.normalize(torch.ones((self.dim, 1, 1)), dim=0))
+        self.weight_b = nn.Parameter(-F.normalize(torch.ones((self.dim, 1, 1)), dim=0))
+
+    def forward(self, cls_proto, bkg_proto):
+        # input is a 2xD dimensional prototype
+        weight = self.weight_c * cls_proto.mean(dim=0).view(-1, 1, 1)
+        weight += self.weight_b * bkg_proto.mean(dim=0).view(-1, 1, 1)
+        return weight.view(-1, 1, 1)
+
+
+class ContextWiseWeightImprinting(Trainer):
     BATCH_SIZE = 4
     EPISODE = 2
     LR = 0.1
-    ITER = 10
+    ITER = 1
 
     def __init__(self, task, device, logger, opts):
-        super(DynamicWI, self).__init__(task, device, logger, opts)
+        super(ContextWiseWeightImprinting, self).__init__(task, device, logger, opts)
         self.dim = self.n_channels
 
-        self.weights = nn.Module()
-        self.weight_a = nn.Parameter(F.normalize(torch.ones((self.n_channels, 1, 1), device=self.device), dim=0))
-        self.weights.register_parameter("weight_a", self.weight_a)
+        self.weights = ContextWiseWeightImprintingModule(self.dim).to(self.device)
 
-        self.weight_b = nn.Parameter(F.normalize(torch.ones((self.n_channels, 1, 1), device=self.device), dim=0))
-        self.weights.register_parameter("weight_b", self.weight_b)
-
-        self.keys = nn.Parameter(
-            torch.FloatTensor(self.task.get_n_classes()[0], self.n_channels).normal_(0., math.sqrt(2 / self.dim)))
-        self.weights.register_parameter("keys", self.keys)
-
-        self.att_weight = nn.Linear(self.dim, self.dim)
-        self.att_weight.weight.data.copy_(torch.eye(self.dim, self.dim) + torch.randn(self.dim, self.dim) * 0.001)
-        self.att_weight.bias.data.zero_()
-        self.weights.add_module("att_weight", self.att_weight)
-
-        self.weights.to(self.device)
-
-        self.use_attention = False
-
-        DynamicWI.LR = opts.dyn_lr
-        DynamicWI.ITER = opts.dyn_iter
-
-    def compute_weight(self, inp, cls_weight):
-        # input is a D dimensional prototype
-        if self.use_attention:
-            sum_weight = torch.zeros(self.dim, 1, 1).to(self.device)
-            count_weight = 0
-            for x in inp:
-                x = self.weights.att_weight(x)  # DxD x D = DxD
-                x = x / x.norm()
-                keys = self.weights.keys / self.weights.keys.norm(dim=1, keepdim=True)  # CxD
-                x = (keys @ x).softmax(dim=0)  # C
-                sum_weight += (x.view(-1, 1, 1, 1) * cls_weight).sum(dim=0)
-                count_weight += 1
-            att_weight = sum_weight / count_weight
-            weight = self.weights.weight_a * inp.mean(dim=0).view(-1, 1, 1) + self.weights.weight_b * att_weight
-        else:
-            weight = self.weights.weight_a * inp.mean(dim=0).view(-1, 1, 1)
-        return weight
+        self.LR = opts.dyn_lr
+        self.ITER = opts.dyn_iter
+        self.EPISODE = ContextWiseWeightImprinting.EPISODE
+        self.BATCH_SIZE = ContextWiseWeightImprinting.BATCH_SIZE
 
     def warm_up_(self, dataset, epochs=1):
         model = self.model.module if self.distributed else self.model
@@ -182,9 +93,11 @@ class DynamicWI(Trainer):
             count = 0
             while weight is None and count < 10:
                 ds = dataset.get_k_image_of_class(cl=c, k=self.task.nshot)  # get K images of class c
-                wc = get_prototype(model, ds, c, self.device, interpolate_label=False, return_all=True)
-                if wc is not None:
-                    weight = self.compute_weight(wc, model.cls.cls[0].weight)
+                protos = get_prototype(model, ds, c, self.device,
+                                       interpolate_label=False, return_all=True, background=True)
+                if protos is not None:
+                    pc, pb = protos
+                    weight = self.weights(pc, pb)
                 count += 1
 
             if weight is not None:
@@ -207,39 +120,41 @@ class DynamicWI(Trainer):
             # instance optimizer, criterion and data
             classes = np.arange(0, self.task.get_n_classes()[0])
             classes = classes[1:]  # remove bkg ONLY from sampling
-            params = [{"params": model.cls.cls.parameters()}, {"params": self.weights.parameters()}]
-            optimizer = torch.optim.SGD(params, lr=DynamicWI.LR)
+            params = [{"params": self.weights.parameters()}]
+            optimizer = torch.optim.SGD(params, lr=self.LR)
             criterion = nn.CrossEntropyLoss(ignore_index=255, reduction='mean')
 
-            dataloader = data.DataLoader(dataset, batch_size=min(DynamicWI.BATCH_SIZE, len(dataset)), shuffle=True,
+            dataloader = data.DataLoader(dataset, batch_size=min(self.BATCH_SIZE, len(dataset)), shuffle=True,
                                          num_workers=4, drop_last=True)
             it = iter(dataloader)
             loss_tot = 0.
             # start train loop
-            for i in range(DynamicWI.ITER):
+            for i in range(self.ITER):
                 loss_step = 0.
                 optimizer.zero_grad()
 
-                for e in range(DynamicWI.EPISODE):
+                for e in range(self.EPISODE):
                     weight = torch.zeros_like(model.cls.cls[0].weight)
                     K = random.choice([1, 2, 5])
                     cls = random.choice(classes)  # sample N classes
                     for c in range(self.task.get_n_classes()[0]):
                         if c == cls:
                             ds = dataset.get_k_image_of_class(cl=cls, k=K)  # get K images of class c
-                            wc = get_prototype(self.model, ds, cls, self.device, return_all=True)
-                            if wc is None:
+                            protos = get_prototype(model, ds, cls, self.device,
+                                                   interpolate_label=False, return_all=True, background=True)
+                            if protos is None:
                                 # print("WC is None!!")
                                 weight[c] = F.normalize(model.cls.cls[0].weight[c], dim=0)
                             else:
-                                class_weight = self.compute_weight(wc, model.cls.cls[0].weight)
+                                pc, pb = protos
+                                class_weight = self.weights(pc, pb)
                                 weight[c] = F.normalize(class_weight, dim=0)
                         else:
                             weight[c] = F.normalize(model.cls.cls[0].weight[c], dim=0)
 
                     # get a batch of images from dataloader
                     it, batch = get_batch(it, dataloader)
-                    ds = dataset.get_k_image_of_class(cl=cls, k=DynamicWI.BATCH_SIZE)  # get K images of class c
+                    ds = dataset.get_k_image_of_class(cl=cls, k=self.BATCH_SIZE)  # get K images of class c
                     im_ds = [ds[i][0].unsqueeze(0) for i in range(len(ds))]
                     lbl_ds = [ds[i][1].unsqueeze(0) for i in range(len(ds))]
                     images = torch.cat([batch[0], *im_ds], dim=0).to(self.device, dtype=torch.float32)
@@ -252,13 +167,14 @@ class DynamicWI(Trainer):
                     out_size = images.shape[-2:]
                     out = F.interpolate(out, size=out_size, mode="bilinear", align_corners=False)
                     loss = criterion(out, labels)
+                    assert not torch.isnan(loss), "Error, loss is NaN"
                     loss.backward()
                     loss_step += loss.item()
                 optimizer.step()
 
-                self.logger.add_scalar("loss_cool_down", loss_step / DynamicWI.EPISODE, i + 1)
-                loss_tot += loss_step / DynamicWI.EPISODE
-                if (i % 10) == 0:
+                self.logger.add_scalar("loss_cool_down", loss_step / self.EPISODE, i + 1)
+                loss_tot += loss_step / self.EPISODE
+                if ((i+1) % 10) == 0:
                     self.logger.info(f"Cool down loss at iter {i + 1}: {loss_tot / 10}")
                     loss_tot = 0
 
@@ -283,14 +199,18 @@ class DynamicWI(Trainer):
         return state
 
 
-class WeightGeneratorModule(nn.Module):
-    def __init__(self, dim_out, dim_in, inner=512):
-        super(WeightGeneratorModule, self).__init__()
-        self.dim = dim_in
-        self.out = dim_out
-        self.weights = nn.Sequential(
-            nn.Linear(dim_in, dim_out)
-        )
+class SpatialWeightGeneratorModule(nn.Module):
+    def __init__(self, dim, naive=False):
+        super(SpatialWeightGeneratorModule, self).__init__()
+        self.dim = dim
+        self.weight_q = nn.Linear(self.dim, self.dim, bias=False)
+        self.weight_q.weight.data.copy_(torch.eye(self.dim, self.dim) + torch.randn(self.dim, self.dim) * 0.001)
+        self.weight_k = nn.Linear(self.dim, self.dim, bias=False)
+        self.weight_k.weight.data.copy_(torch.eye(self.dim, self.dim) + torch.randn(self.dim, self.dim) * 0.001)
+        self.weight_v = nn.Linear(self.dim, self.dim, bias=False)
+        self.weight_v.weight.data.copy_(torch.eye(self.dim, self.dim) + torch.randn(self.dim, self.dim) * 0.001)
+
+        self.naive = naive
 
     def forward(self, images, labels, model, cls, device):
         # I expect feat with size BxCxHxW and lbl with size BxHxW
@@ -299,7 +219,7 @@ class WeightGeneratorModule(nn.Module):
                 feat = []
                 lbls = []
                 for img, lbl in zip(images, labels):
-                    _, _, f = model(img.to(device), return_feat=True, return_body=True)
+                    f = model(img.to(device), use_classifier=False).detach()
                     f = F.interpolate(f, size=lbl.shape[-2:], mode="bilinear", align_corners=False)
                     f = f.permute(0, 2, 3, 1).flatten(end_dim=2)  # HW x C
                     feat.append(f)
@@ -312,7 +232,7 @@ class WeightGeneratorModule(nn.Module):
             img = torch.cat(images, dim=0).to(device)
             lbl = torch.cat(labels, dim=0).to(device)
             with torch.no_grad():
-                _, _, feat = model(img, return_feat=True, return_body=True)
+                feat = model(img, use_classifier=False).detach()
             out_size = feat.shape[-2:]
 
             feat = feat.permute(0, 2, 3, 1).flatten(end_dim=2)  # N x C
@@ -328,20 +248,28 @@ class WeightGeneratorModule(nn.Module):
 
         if mask.sum() == 0:
             return None
-
         p_cls = (mask * feat).sum(dim=0, keepdim=True) / mask.sum()  # 1 x C
+        if self.naive:
+            Q = feat
+            K = p_cls
+            V = feat
+        else:
+            Q = self.weight_q(feat)  # N x C
+            K = self.weight_k(p_cls)  # 1 x C
+            V = self.weight_v(feat)  # N x C
 
-        weight = self.weights(p_cls)
+        a_cl = F.softmax(K @ Q.T, dim=1)  # 1 x N
+        weight = a_cl @ V
         return weight.view(-1, 1, 1)
 
 
-class WeightGenerator(Trainer):  # SWG
+class SpatialWeightGenerator(Trainer):  # SWG
 
     def __init__(self, task, device, logger, opts):
-        super(WeightGenerator, self).__init__(task, device, logger, opts)
+        super(SpatialWeightGenerator, self).__init__(task, device, logger, opts)
         self.dim = self.n_channels
-
-        self.weights = WeightGeneratorModule(self.dim, 2048).to(self.device)
+        self.naive = False
+        self.weights = SpatialWeightGeneratorModule(self.dim, self.naive).to(self.device)
 
         self.LR = opts.dyn_lr
         self.ITER = opts.dyn_iter
@@ -456,7 +384,7 @@ class WeightGenerator(Trainer):  # SWG
 
     def load_state_dict(self, checkpoint, strict=True):
         super().load_state_dict(checkpoint, strict)
-        if self.step > 0:
+        if self.step > 0 and not self.naive:
             self.weights.load_state_dict(checkpoint['weights'])
             self.weights.to(self.device)
 

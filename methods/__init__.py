@@ -1,8 +1,9 @@
 from .segmentation_module import make_model
 from .trainer import Trainer
 from .imprinting import *
+from .generative import AFHN
 
-methods = {"FT", "SPN", "COS", "WI", 'DWI', 'WM', "AMP", "WG", "SWG", "GIFS", "LWF", "MIB", "ILT", "RT"}
+methods = {"FT", "SPN", "COS", "WI", 'DWI', "AMP", "WG", "GIFS", "LWF", "MIB", "ILT", "RT", "AFHN"}
 
 
 def get_method(opts, task, device, logger):
@@ -11,18 +12,15 @@ def get_method(opts, task, device, logger):
         return WeightImprinting(task=task, device=device, logger=logger, opts=opts)
     elif opts.method == 'WG':
         opts.method = 'COS'
-        return ContextWiseWeightImprinting(task=task, device=device, logger=logger, opts=opts)
-    elif opts.method == 'SWG':
-        opts.method = 'COS'
-        return SpatialWeightGenerator(task=task, device=device, logger=logger, opts=opts)
+        return WeightGenerator(task=task, device=device, logger=logger, opts=opts)
     elif opts.method == 'DWI':
         opts.method = 'COS'
         return DynamicWI(task=task, device=device, logger=logger, opts=opts)
-    elif opts.method == 'WM':
-        opts.method = 'COS'
-        return WeightMixing(task=task, device=device, logger=logger, opts=opts)
     elif opts.method == 'AMP':
         opts.method = 'FT'
         return AMP(task=task, device=device, logger=logger, opts=opts)
+    elif opts.method == 'AFHN':
+        opts.method = 'FT'
+        return AFHN(task=task, device=device, logger=logger, opts=opts)
     else:
         return Trainer(task=task, device=device, logger=logger, opts=opts)

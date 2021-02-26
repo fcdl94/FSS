@@ -37,6 +37,11 @@ def modify_command_options(opts):
         opts.train_only_classifier = True
         opts.method = "FT"
         opts.lr_cls = 10
+    elif opts.method == 'AFHN' and opts.step > 0:
+        opts.train_only_novel = True
+        opts.train_only_classifier = True
+        opts.method = "AFHN"
+        opts.lr_cls = 10
 
     if opts.train_only_classifier:
         opts.freeze = True

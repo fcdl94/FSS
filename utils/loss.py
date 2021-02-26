@@ -174,7 +174,7 @@ class CosineLoss(nn.Module):
         self.crit = nn.CosineSimilarity(dim=1)
 
     def forward(self, x, y):
-        loss = self.crit(x, y)
+        loss = 1 - self.crit(x, y)
 
         if self.reduction == 'mean':
             loss = torch.mean(loss)

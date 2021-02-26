@@ -89,6 +89,10 @@ class Trainer:
 
         self.reduction = HardNegativeMining() if opts.hnm else MeanReduction()
 
+        # Feature generation
+        self.generated_criterion = None
+        self.gen_weight = 1.
+
         # Feature distillation
         if opts.l2_loss > 0 or opts.cos_loss > 0 or opts.l1_loss > 0:
             assert self.model_old is not None, "Error, model old is None but distillation specified"
@@ -187,6 +191,9 @@ class Trainer:
     def cool_down(self, dataset, epochs=1):
         pass
 
+    def generate_synth_feat(self, images=None, labels=None):
+        return None
+
     def train(self, cur_epoch, train_loader, metrics=None, print_int=10, n_iter=1):
         """Train and return epoch loss"""
         if metrics is not None:
@@ -219,6 +226,8 @@ class Trainer:
                 labels = labels.to(device, dtype=torch.long)
 
                 rloss = torch.tensor([0.]).to(self.device)
+                gloss = torch.tensor([0.]).to(self.device)
+
                 optim.zero_grad()
                 outputs, feat, body = model(images, return_feat=True, return_body=True)
 
@@ -226,7 +235,7 @@ class Trainer:
                 if self.model_old is not None:
                     outputs_old, feat_old, body_old = self.model_old(images, return_feat=True, return_body=True)
                     if self.kd_criterion is not None:
-                        kd_loss = self.kd_loss * self.kd_criterion(outputs, outputs_old)
+                        kd_loss = self.kd_loss * self.kd_criterion(outputs[1:], outputs_old[1:])
                         rloss += kd_loss
                     if self.feat_criterion is not None:
                         feat_loss = self.feat_loss * self.feat_criterion(feat, feat_old)
@@ -235,10 +244,15 @@ class Trainer:
                         de_loss = self.de_loss * self.de_criterion(feat, feat_old)
                         rloss += de_loss
 
+                if self.generated_criterion is not None:
+                    gen_feat, gen_target = self.generate_synth_feat()
+                    score = model(gen_feat, only_classifier=True)
+                    gloss += self.gen_weight * self.generated_criterion(score, gen_target.to(self.device))
+
                 loss = self.reduction(criterion(outputs, labels), labels)
 
                 # if rloss <= CLIP:
-                loss_tot = loss + rloss
+                loss_tot = loss + rloss + gloss
                 # else:
                 #     print(f"Warning, rloss is {rloss}! Term ignored")
                 #     loss_tot = loss
