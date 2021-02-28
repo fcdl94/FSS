@@ -235,7 +235,7 @@ class Trainer:
                 if self.model_old is not None:
                     outputs_old, feat_old, body_old = self.model_old(images, return_feat=True, return_body=True)
                     if self.kd_criterion is not None:
-                        kd_loss = self.kd_loss * self.kd_criterion(outputs[1:], outputs_old[1:])
+                        kd_loss = self.kd_loss * self.kd_criterion(outputs, outputs_old)
                         rloss += kd_loss
                     if self.feat_criterion is not None:
                         feat_loss = self.feat_loss * self.feat_criterion(feat, feat_old)
