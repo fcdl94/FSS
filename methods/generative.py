@@ -49,8 +49,13 @@ class AFHN(Trainer):
         self.discriminator.train()
         self.Z_dist = normal.Normal(0, 1)
 
+        if self.task.step > 0:
+            for par in self.generator.parameters():
+                par.requires_grad = False
+
         self.ITER = 10000
         self.BATCH_SIZE = 10
+        self.gen_BS = 512
         self.n_critic = 5
         self.lmbda = 10
         self.alpha = 1
@@ -58,7 +63,6 @@ class AFHN(Trainer):
         self.use_cls_loss = True
         self.use_anti_collapse = True
 
-        self.gen_epochs = 5
         classes = self.task.get_n_classes()
 
         self.class_seed = torch.zeros(self.task.num_classes, self.dim).to(self.device)
@@ -104,21 +108,18 @@ class AFHN(Trainer):
             self.class_seed[c] = sum_features[c-old_classes] / count[c-old_classes]
 
     def update_means(self, real_feat, real_lbl):
-        for i, c in enumerate(real_lbl):
+        lbl = real_lbl.view(-1)
+        for i, c in enumerate(lbl):
             self.class_seed[c] = 0.9 * self.class_seed[c] + 0.1 * real_feat[i]
 
     def generate_synth_feat(self, images=None, labels=None):
-        feat = self.class_seed[self.labels]
+        labels = np.random.choice(np.arange(1, self.task.num_classes), self.gen_BS)
+        feat = self.class_seed[labels]
 
-        gen_feat_, gen_lbl_ = [], []
-        for i in range(self.gen_epochs):
-            Z = self.Z_dist.sample((feat.shape[0], self.z_dim)).to(self.device)
-            gen_in = torch.cat((Z, feat), dim=1)
-            gen_feat_.append(self.generator(gen_in).view(-1, self.dim, 1, 1))
-            gen_lbl_.append(self.labels.view(-1, 1, 1))
-
-        gen_feat = torch.cat(gen_feat_, dim=0)
-        gen_lbl = torch.cat(gen_lbl_, dim=0)
+        Z = self.Z_dist.sample((feat.shape[0], self.z_dim)).to(self.device)
+        gen_in = torch.cat((Z, feat), dim=1)
+        gen_feat = self.generator(gen_in).view(-1, self.dim, 1, 1).detach()
+        gen_lbl = torch.tensor(labels).view(-1, 1, 1)
 
         return gen_feat, gen_lbl
 

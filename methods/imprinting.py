@@ -288,34 +288,41 @@ class WeightGeneratorModule(nn.Module):
         super(WeightGeneratorModule, self).__init__()
         self.dim = dim_in
         self.out = dim_out
-        self.weights = nn.Sequential(
+        self.body = nn.Sequential(
             nn.Linear(dim_in, dim_out)
         )
+        self.head = nn.Parameter(torch.ones(self.out))
 
     def forward(self, images, labels, model, cls, device):
         # I expect feat with size BxCxHxW and lbl with size BxHxW
         if not self.training:
             with torch.no_grad():
                 feat = []
+                body = []
                 lbls = []
                 for img, lbl in zip(images, labels):
-                    _, _, f = model(img.to(device), return_feat=True, return_body=True)
+                    _, f, b = model(img.to(device), return_feat=True, return_body=True)
                     f = F.interpolate(f, size=lbl.shape[-2:], mode="bilinear", align_corners=False)
                     f = f.permute(0, 2, 3, 1).flatten(end_dim=2)  # HW x C
+                    b = F.interpolate(b, size=lbl.shape[-2:], mode="bilinear", align_corners=False)
+                    b = b.permute(0, 2, 3, 1).flatten(end_dim=2)  # HW x C
                     feat.append(f)
+                    body.append(b)
                     lbls.append(lbl.flatten())  # HW
 
                 feat = torch.cat(feat, dim=0)
+                body = torch.cat(body, dim=0)
                 lbl = torch.cat(lbls, dim=0).to(device)
                 mask = lbl.eq(cls).type(torch.long).view(-1, 1)
         else:
             img = torch.cat(images, dim=0).to(device)
             lbl = torch.cat(labels, dim=0).to(device)
             with torch.no_grad():
-                _, _, feat = model(img, return_feat=True, return_body=True)
+                _, feat, body = model(img, return_feat=True, return_body=True)
             out_size = feat.shape[-2:]
 
             feat = feat.permute(0, 2, 3, 1).flatten(end_dim=2)  # N x C
+            body = body.permute(0, 2, 3, 1).flatten(end_dim=2)  # N x C
             lbl = (F.interpolate(lbl.float().unsqueeze(1),
                                  size=out_size, mode="nearest").type(torch.uint8))
             # Flat them all
@@ -323,19 +330,17 @@ class WeightGeneratorModule(nn.Module):
             mask = lbl.eq(cls).type(torch.long)  # HW
             mask = mask.view(-1, 1)  # BHW = N
 
-        feat = feat[lbl != 255]
-        mask = mask[lbl != 255]
-
         if mask.sum() == 0:
             return None
 
-        p_cls = (mask * feat).sum(dim=0, keepdim=True) / mask.sum()  # 1 x C
+        p_cls_feat = (mask * feat).sum(dim=0, keepdim=True) / mask.sum()  # 1 x C
+        p_cls_body = (mask * body).sum(dim=0, keepdim=True) / mask.sum()  # 1 x C
 
-        weight = self.weights(p_cls)
+        weight = self.body(p_cls_body) + self.head * p_cls_feat
         return weight.view(-1, 1, 1)
 
 
-class WeightGenerator(Trainer):  # SWG
+class WeightGenerator(Trainer):  # WG
 
     def __init__(self, task, device, logger, opts):
         super(WeightGenerator, self).__init__(task, device, logger, opts)
@@ -389,7 +394,7 @@ class WeightGenerator(Trainer):  # SWG
             classes = np.arange(0, self.task.get_n_classes()[0])
             classes = classes[1:]  # remove bkg ONLY from sampling
             params = [{"params": self.weights.parameters()}]
-            optimizer = torch.optim.SGD(params, lr=self.LR)
+            optimizer = torch.optim.Adam(params, lr=self.LR)
             criterion = nn.CrossEntropyLoss(ignore_index=255, reduction='mean')
 
             dataloader = data.DataLoader(dataset, batch_size=min(self.BATCH_SIZE, len(dataset)), shuffle=True,
