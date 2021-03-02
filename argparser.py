@@ -229,6 +229,8 @@ def get_argparser():
                         help='LR for Generation (Def 1e-4)')
     parser.add_argument("--gen_iter", default=10000, type=int,
                         help='Iterations for Generation (Def 1e5)')
+    parser.add_argument("--gen_pixtopix", action='store_true', default=False,
+                        help='Use PixToPix Generator')
 
     # to remove
     parser.add_argument("--pixel_imprinting", action='store_true', default=False,

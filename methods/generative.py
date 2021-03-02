@@ -4,72 +4,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils import data
 from .utils import get_batch
-from torch.distributions import normal
+from functools import partial
 from torch.autograd import grad as torch_grad
 from torch.autograd import Variable
 import numpy as np
-
-
-class FeatGenerator(nn.Module):
-    def __init__(self, z_dim, attr_dim, dim=256):
-        super(FeatGenerator, self).__init__()
-        self.dim = dim
-        self.z_dim = z_dim
-        self.Z_dist = normal.Normal(0, 1)
-
-        self.net = nn.Sequential(
-            nn.Conv2d(z_dim+attr_dim, dim, 3, 1, 1, bias=False),  # this is 4,1,1 instead of 4,2,1
-            nn.LeakyReLU(0.2, inplace=True),
-            # # state size. (ndf) x 32 x 32
-            nn.Conv2d(dim, dim*2, 3, 1, 1, bias=False),
-            nn.BatchNorm2d(dim * 2),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*2) x 16 x 16
-            nn.Conv2d(dim * 2, dim * 4, 3, 1, 1, bias=False),
-            nn.BatchNorm2d(dim * 4),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*4) x 8 x 8
-            nn.Conv2d(dim * 4, dim * 8, 3, 1, 1, bias=False),
-            nn.BatchNorm2d(dim * 8),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*8) x 4 x 4
-            nn.Conv2d(dim * 8, attr_dim, 1, 1, 0, bias=False),
-        )
-
-    def forward(self, x, z=None):
-        if z is None:
-            z = self.Z_dist.sample((x.shape[0], self.z_dim, x.shape[2], x.shape[3]))
-            z = z.to(x.device)
-        return self.net(torch.cat((x, z), dim=1))
-
-
-class DCGANDiscriminator(nn.Module):
-    def __init__(self, in_feat=2048, dim=256):
-        super(DCGANDiscriminator, self).__init__()
-        self.main = nn.Sequential(
-            # OUR input is already 32x32 so skip first stride.
-            # input is (nc) x 64 x 64
-            nn.Conv2d(in_feat, dim, 3, 1, 1, bias=False),  # this is 4,1,1 instead of 4,2,1
-            nn.LeakyReLU(0.2, inplace=True),
-            # # state size. (ndf) x 32 x 32
-            nn.Conv2d(dim, dim * 2, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(dim * 2),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*2) x 16 x 16
-            nn.Conv2d(dim * 2, dim * 4, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(dim * 4),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*4) x 8 x 8
-            nn.Conv2d(dim * 4, dim * 8, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(dim * 8),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*8) x 4 x 4
-            nn.Conv2d(dim * 8, 1, 4, 1, 0, bias=False),
-            nn.Sigmoid()
-        )
-
-    def forward(self, x):
-        return self.main(x)
+from modules.generators import FeatGenerator, DCGANDiscriminator, GlobalGenerator
 
 
 class FGI(Trainer):
@@ -78,7 +17,11 @@ class FGI(Trainer):
 
         self.dim = 2048
         self.z_dim = 128
-        self.generator = FeatGenerator(self.z_dim, self.dim).to(device)
+        if opts.gen_pixtopix:
+            self.generator = GlobalGenerator(self.z_dim+self.dim, self.dim, ngf=64, n_downsampling=2, n_blocks=3,
+                                             norm_layer=partial(nn.InstanceNorm2d, affine=False))
+        else:
+            self.generator = FeatGenerator(self.z_dim, self.dim).to(device)
         self.discriminator = DCGANDiscriminator(in_feat=self.dim, dim=256).to(device)
         self.discriminator.train()
 
@@ -94,6 +37,7 @@ class FGI(Trainer):
 
         if task.step > 0:
             self.generated_criterion = nn.CrossEntropyLoss(reduction='mean')
+            self.generator.eval()
 
     def warm_up_(self, dataset, epochs=1):
         model = self.model.module if self.distributed else self.model

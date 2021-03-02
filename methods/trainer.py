@@ -3,7 +3,7 @@ from torch import distributed
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel
 from utils.loss import HardNegativeMining, FocalLoss, KnowledgeDistillationLoss, CosineLoss, \
-    UnbiasedKnowledgeDistillationLoss, UnbiasedCrossEntropy, CosineKnowledgeDistillationLoss
+    UnbiasedKnowledgeDistillationLoss, UnbiasedCrossEntropy, CosineKnowledgeDistillationLoss, ClassBkgLoss
 from .segmentation_module import make_model
 from modules.classifier import IncrementalClassifier, CosineClassifier, SPNetClassifier
 from .utils import get_scheduler, MeanReduction
@@ -130,6 +130,13 @@ class Trainer:
         else:
             self.de_criterion = None
 
+        # Regularization
+        if opts.bkg_dist > 0:
+            self.bkg_dist = opts.bkg_dist
+            self.bkg_dist_crit = ClassBkgLoss(self.novel_classes)
+        else:
+            self.bkg_dist_crit = None
+
     def make_model(self, is_old=False):
         classifier, self.n_channels = self.get_classifier(is_old)
         model = make_model(self.opts, classifier)
@@ -245,6 +252,9 @@ class Trainer:
                     if self.de_criterion is not None:
                         de_loss = self.de_loss * self.de_criterion(feat, feat_old)
                         rloss += de_loss
+
+                if self.bkg_dist_crit is not None:
+                    rloss += self.bkg_dist * self.bkg_dist_crit(outputs, labels)
 
                 gloss += self.generative_loss(images, labels)
 
