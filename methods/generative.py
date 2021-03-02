@@ -10,67 +10,88 @@ from torch.autograd import Variable
 import numpy as np
 
 
-class Generator(nn.Module):
-    def __init__(self, z_dim, attr_dim, out_dim):
-        super(Generator, self).__init__()
-        self.model = nn.Sequential(
-            nn.Linear(z_dim + attr_dim, 4096),
-            nn.LeakyReLU(),
-            nn.Linear(4096, out_dim),
+class FeatGenerator(nn.Module):
+    def __init__(self, z_dim, attr_dim, dim=256):
+        super(FeatGenerator, self).__init__()
+        self.dim = dim
+        self.z_dim = z_dim
+        self.Z_dist = normal.Normal(0, 1)
+
+        self.net = nn.Sequential(
+            nn.Conv2d(z_dim+attr_dim, dim, 3, 1, 1, bias=False),  # this is 4,1,1 instead of 4,2,1
+            nn.LeakyReLU(0.2, inplace=True),
+            # # state size. (ndf) x 32 x 32
+            nn.Conv2d(dim, dim*2, 3, 1, 1, bias=False),
+            nn.BatchNorm2d(dim * 2),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*2) x 16 x 16
+            nn.Conv2d(dim * 2, dim * 4, 3, 1, 1, bias=False),
+            nn.BatchNorm2d(dim * 4),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*4) x 8 x 8
+            nn.Conv2d(dim * 4, dim * 8, 3, 1, 1, bias=False),
+            nn.BatchNorm2d(dim * 8),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*8) x 4 x 4
+            nn.Conv2d(dim * 8, attr_dim, 1, 1, 0, bias=False),
         )
 
-    def forward(self, z):
-        return self.model(z)
+    def forward(self, x, z=None):
+        if z is None:
+            z = self.Z_dist.sample((x.shape[0], self.z_dim, x.shape[2], x.shape[3]))
+            z = z.to(x.device)
+        return self.net(torch.cat((x, z), dim=1))
 
 
-class Discriminator(nn.Module):
-    def __init__(self, x_dim, attr_dim):
-        super(Discriminator, self).__init__()
-        self.model = nn.Sequential(
-            nn.Dropout(0.1),
-            nn.Linear(x_dim + attr_dim, 4096),
-            nn.LeakyReLU(),
-            nn.Linear(4096, 1),
+class DCGANDiscriminator(nn.Module):
+    def __init__(self, in_feat=2048, dim=256):
+        super(DCGANDiscriminator, self).__init__()
+        self.main = nn.Sequential(
+            # OUR input is already 32x32 so skip first stride.
+            # input is (nc) x 64 x 64
+            nn.Conv2d(in_feat, dim, 3, 1, 1, bias=False),  # this is 4,1,1 instead of 4,2,1
+            nn.LeakyReLU(0.2, inplace=True),
+            # # state size. (ndf) x 32 x 32
+            nn.Conv2d(dim, dim * 2, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(dim * 2),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*2) x 16 x 16
+            nn.Conv2d(dim * 2, dim * 4, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(dim * 4),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*4) x 8 x 8
+            nn.Conv2d(dim * 4, dim * 8, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(dim * 8),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*8) x 4 x 4
+            nn.Conv2d(dim * 8, 1, 4, 1, 0, bias=False),
             nn.Sigmoid()
         )
 
     def forward(self, x):
-        return self.model(x)
+        return self.main(x)
 
 
-class AFHN(Trainer):
+class FGI(Trainer):
     def __init__(self, task, device, logger, opts):
         super().__init__(task, device, logger, opts)
 
-        self.dim = 256
+        self.dim = 2048
         self.z_dim = 128
-        self.generator = Generator(self.z_dim, self.dim, self.dim).to(device)
-        self.discriminator = Discriminator(self.dim, self.dim).to(device)
+        self.generator = FeatGenerator(self.z_dim, self.dim).to(device)
+        self.discriminator = DCGANDiscriminator(in_feat=self.dim, dim=256).to(device)
         self.discriminator.train()
-        self.Z_dist = normal.Normal(0, 1)
 
-        if self.task.step > 0:
-            for par in self.generator.parameters():
-                par.requires_grad = False
-
-        self.ITER = 10000
+        self.ITER = opts.gen_iter
+        self.LR = opts.gen_lr
         self.BATCH_SIZE = 10
-        self.gen_BS = 512
         self.n_critic = 5
         self.lmbda = 10
         self.alpha = 1
         self.beta = 1
         self.use_cls_loss = True
-        self.use_anti_collapse = True
+        self.use_bkg_loss = opts.gen_use_bkg_loss
 
-        classes = self.task.get_n_classes()
-
-        self.class_seed = torch.zeros(self.task.num_classes, self.dim).to(self.device)
-
-        old_classes = 0
-        for c in classes[:-1]:
-            old_classes += c
-        self.labels = torch.LongTensor(np.arange(old_classes, old_classes + classes[-1]))
         if task.step > 0:
             self.generated_criterion = nn.CrossEntropyLoss(reduction='mean')
 
@@ -84,68 +105,98 @@ class AFHN(Trainer):
         new_classes = np.arange(old_classes, old_classes + classes[-1])
         sum_features = torch.zeros(classes[-1], model.head_channels).to(self.device)
         count = torch.zeros(classes[-1]).to(self.device)
+        for ep in range(epochs):
+            with torch.no_grad():
+                for idx in range(len(dataset)):
+                    images, labels = dataset[idx]
+                    images = images.to(self.device, dtype=torch.float32)
+                    labels = labels.to(self.device, dtype=torch.long)
+                    out = model(images.unsqueeze(0), use_classifier=False)  # .squeeze_(0)
+                    out_size = images.shape[-2:]
+                    out = F.interpolate(out, size=out_size, mode="bilinear", align_corners=False).squeeze_(0)
+                    # labels = F.interpolate(labels.float().view(1, 1, labels.shape[0], labels.shape[1]),
+                    #                        size=out.shape[-2:], mode="nearest").view(out.shape[-2:]).type(torch.uint8)
+                    cl = labels.unique().cpu().numpy()  # get list of classes
+                    for c in new_classes:
+                        if c in cl:
+                            feat = out[:, labels == c]  # F x P (pixels of class c)
+
+                            feat = F.normalize(F.normalize(feat, dim=0).sum(dim=1), dim=0)
+                            sum_features[c - old_classes] += feat
+                            count[c - old_classes] += 1
+
+        # we have finished computing features, now collect and imprint!
+        assert torch.any(count != 0), "Error, a novel class has no pixels!"
+        features = F.normalize(sum_features, dim=1)
+        model.cls.imprint_weights_step(step=self.task.step, features=features)
+
+    def generative_loss(self, images=None, labels=None):
         with torch.no_grad():
-            for idx in range(len(dataset)):
-                images, labels = dataset[idx]
-                images = images.to(self.device, dtype=torch.float32)
-                labels = labels.to(self.device, dtype=torch.long)
+            gen_feat, gen_target = self.generate_synth_feat(images, labels)
+        score = self.model(gen_feat, only_head=True)
+        loss = self.generated_criterion(score, gen_target)
 
-                out = model(images.unsqueeze(0), use_classifier=False)
+        if self.model_old is not None:
+            score_old = self.model_old(gen_feat, only_head=True)
+            if self.kd_criterion is not None:
+                loss += self.kd_loss * self.kd_criterion(score, score_old)
 
-                out_size = images.shape[-2:]
-                out = F.interpolate(out, size=out_size, mode="bilinear", align_corners=False).squeeze_(0)
-
-                cl = labels.unique().cpu().numpy()  # get list of classes
-                for c in new_classes:
-                    if c in cl:
-                        feat = out[:, labels == c]  # F x P (pixels of class c)
-                        feat = feat.mean(dim=1)
-                        sum_features[c - old_classes] += feat
-                        count[c - old_classes] += 1
-
-        # we have finished computing features, now collect and store for generation
-        for c in new_classes:
-            self.class_seed[c] = sum_features[c-old_classes] / count[c-old_classes]
-
-    def update_means(self, real_feat, real_lbl):
-        lbl = real_lbl.view(-1)
-        for i, c in enumerate(lbl):
-            self.class_seed[c] = 0.9 * self.class_seed[c] + 0.1 * real_feat[i]
+        return self.gen_weight * loss
 
     def generate_synth_feat(self, images=None, labels=None):
-        labels = np.random.choice(np.arange(1, self.task.num_classes), self.gen_BS)
-        feat = self.class_seed[labels]
+        real_feat, real_lbl = self.get_real_features(self.model, images, labels)
+        masked_feat, masked_lbl, real_feat, real_lbl = self.mask_features(real_feat, real_lbl)
 
-        Z = self.Z_dist.sample((feat.shape[0], self.z_dim)).to(self.device)
-        gen_in = torch.cat((Z, feat), dim=1)
-        gen_feat = self.generator(gen_in).view(-1, self.dim, 1, 1).detach()
-        gen_lbl = torch.tensor(labels).view(-1, 1, 1)
+        gen_feat = self.generator(masked_feat).detach()
 
-        return gen_feat, gen_lbl
+        return gen_feat, masked_lbl
 
     @staticmethod
     def get_real_features(model, images, labels):
         with torch.no_grad():
-            feat = model(images, use_classifier=False)
-        labels = F.interpolate(labels.float().unsqueeze(1),
-                               size=feat.shape[-2:], mode="nearest").type(torch.uint8)
-        feat = feat.permute(0, 2, 3, 1).flatten(end_dim=2)  # B H W C
-        labels = labels.flatten()
+            _, _, feat = model(images, return_feat=True, return_body=True)
+        # Downsample labels to match feat size (32x32)
+        labels = F.interpolate(labels.float().unsqueeze(1), size=feat.shape[-2:], mode="nearest").type(torch.uint8)
+
+        return feat, labels.squeeze(1)  # get back to B x H x W
+
+    @staticmethod
+    def get_bkg_proto(feat, labels):
+        protos = []
+        for i in range(feat.shape[0]):  # each image independently
+            mask = labels[i] == 0
+            if mask.sum() > 0:
+                f = feat[i][:, mask].mean(dim=1)  # should  be 1xD
+                protos.append(f.view(1, -1))
+        return torch.cat(protos, dim=0)
+
+    @staticmethod
+    def mask_features(feat, lbl):
+        mask_feat = []
         real_feat = []
-        real_lbls = []
-        for c in labels.unique():
-            if c != 255:
-                real_feat.append(feat[labels == c].mean(dim=0, keepdim=True))  # 1 x C
-                real_lbls.append(c.view(1, 1))
-        real_feat = torch.cat(real_feat, dim=0)
-        real_lbls = torch.cat(real_lbls, dim=0)
-        return real_feat, real_lbls
+        mask_lbl = []
+        real_lbl = []
+        for i in range(feat.shape[0]):  # each image independently
+            cls = lbl[i].unique()
+            cls = cls[cls != 0]  # filter out bkg and void
+            cls = cls[cls != 255]
+            if len(cls) > 0:
+                p = torch.ones_like(cls) * 1.  # make it float
+                idx = p.multinomial(num_samples=1)
+                cl = cls[idx]
+                m = torch.eq(lbl[i], cl)
+                mask_feat.append((feat[i]*m).unsqueeze(0))
+                real_feat.append(feat[i].unsqueeze(0))
+                mask_lbl.append((lbl[i]*m).unsqueeze(0))
+                real_lbl.append((lbl[i]).unsqueeze(0))
+        return torch.cat(mask_feat, dim=0), torch.cat(mask_lbl, dim=0).long(), \
+               torch.cat(real_feat, dim=0), torch.cat(real_lbl, dim=0).long()
 
     def _gradient_penalty(self, real_data, generated_data):
-        batch_size = real_data.size()[0]
+        batch_size = real_data.shape[0]
 
         # Calculate interpolation
-        alpha = torch.rand(batch_size, 1)
+        alpha = torch.rand(batch_size, 1, 1, 1)
         alpha = alpha.expand_as(real_data).to(self.device)
 
         interpolated = alpha * real_data.data + (1 - alpha) * generated_data.data
@@ -177,8 +228,8 @@ class AFHN(Trainer):
             model.fix_bn()
             model.eval()
             # instance optimizer, criterion and data
-            optim_G = torch.optim.Adam(self.generator.parameters(), lr=1e-4)
-            optim_D = torch.optim.Adam(self.discriminator.parameters(), lr=1e-4)
+            optim_G = torch.optim.Adam(self.generator.parameters(), lr=self.LR)
+            optim_D = torch.optim.Adam(self.discriminator.parameters(), lr=self.LR)
 
             criterion = nn.CrossEntropyLoss(ignore_index=255, reduction='mean')
 
@@ -193,9 +244,8 @@ class AFHN(Trainer):
             for i in range(self.ITER):
                 it, batch = get_batch(it, dataloader)
                 images, labels = batch[0].to(self.device), batch[1].to(self.device)
-                real_feat, real_lbl = self.get_real_features(model, images, labels)
-
-                self.update_means(real_feat, real_lbl)
+                real_feat, real_lbl, = self.get_real_features(model, images, labels)
+                masked_feat, masked_lbl, real_feat, real_lbl = self.mask_features(real_feat, real_lbl)
 
                 total_discr_loss = 0.
                 total_grad_penalty = 0.
@@ -204,25 +254,13 @@ class AFHN(Trainer):
                 # Optimize Critic (n times)
                 #
                 for _ in range(self.n_critic):
-                    Z1 = self.Z_dist.sample((real_feat.shape[0], self.z_dim)).to(self.device)
-                    gen_in1 = torch.cat((Z1, real_feat), dim=1)
-                    gen_feat1 = self.generator(gen_in1)
-
-                    Z2 = self.Z_dist.sample((real_feat.shape[0], self.z_dim)).to(self.device)
-                    gen_in2 = torch.cat((Z2, real_feat), dim=1)
-                    gen_feat2 = self.generator(gen_in2)
-
-                    X_gen1 = torch.cat((gen_feat1, real_feat), dim=1)
-                    X_gen2 = torch.cat((gen_feat2, real_feat), dim=1)
-                    X_real = torch.cat((real_feat, real_feat), dim=1)
+                    gen_feat = self.generator(masked_feat)
 
                     # calculate normal WGAN loss
-                    discr_loss = 0.5*(self.discriminator(X_gen1) - self.discriminator(X_real)).mean()
-                    discr_loss += 0.5*(self.discriminator(X_gen2) - self.discriminator(X_real)).mean()
+                    discr_loss = (self.discriminator(gen_feat) - self.discriminator(real_feat)).mean()
 
                     # calculate gradient penalty
-                    grad_penalty = 0.5 * self.lmbda * self._gradient_penalty(X_real, X_gen1)
-                    grad_penalty += 0.5 * self.lmbda * self._gradient_penalty(X_real, X_gen2)
+                    grad_penalty = self.lmbda * self._gradient_penalty(real_feat, gen_feat)
 
                     # update critic params
                     optim_D.zero_grad()
@@ -235,29 +273,20 @@ class AFHN(Trainer):
                 #
                 # Optimize Generator (n times)
                 #
-                Z1 = self.Z_dist.sample((real_feat.shape[0], self.z_dim)).to(self.device)
-                gen_in1 = torch.cat((Z1, real_feat), dim=1)
-                gen_feat1 = self.generator(gen_in1)
-
-                Z2 = self.Z_dist.sample((real_feat.shape[0], self.z_dim)).to(self.device)
-                gen_in2 = torch.cat((Z2, real_feat), dim=1)
-                gen_feat2 = self.generator(gen_in2)
-
-                X_gen1 = torch.cat((gen_feat1, real_feat), dim=1)
-                X_gen2 = torch.cat((gen_feat2, real_feat), dim=1)
-
-                gen_loss = - 0.5 * (torch.mean(self.discriminator(X_gen1)) + torch.mean(self.discriminator(X_gen2)))
+                gen_feat = self.generator(masked_feat)
+                gen_loss = - (torch.mean(self.discriminator(gen_feat)))
                 get_tot_loss += gen_loss
 
                 if self.use_cls_loss:
-                    classifier = model.cls
-                    score = classifier(torch.cat((gen_feat1, gen_feat2), dim=0).view(-1, self.dim, 1, 1))  # N C 1 1
-                    target = torch.cat((real_lbl, real_lbl), dim=0).view(-1, 1, 1).long()
-                    class_loss = criterion(score, target)
+                    classifier = nn.Sequential(model.head, model.cls)
+                    score = classifier(gen_feat)
+                    class_loss = criterion(score, masked_lbl)
                     get_tot_loss += self.alpha * class_loss
 
-                if self.use_anti_collapse:
-                    ar_loss = (1 - F.cosine_similarity(Z1, Z2)) / (1 - F.cosine_similarity(gen_feat1, gen_feat2))
+                if self.use_bkg_loss:
+                    bkg_real = self.get_bkg_proto(real_feat, masked_lbl)
+                    bkg_fake = self.get_bkg_proto(gen_feat, masked_lbl)
+                    ar_loss = F.cosine_similarity(bkg_real, bkg_fake)
                     ar_loss = ar_loss.mean()
                     get_tot_loss += self.beta * ar_loss.mean()
 
@@ -283,14 +312,10 @@ class AFHN(Trainer):
             self.generator.to(self.device)
             self.discriminator.load_state_dict(checkpoint['discriminator'])
             self.discriminator.to(self.device)
-            if "seed" in checkpoint:
-                seed = checkpoint['seed']
-                for i in range(len(seed)):
-                    self.class_seed[i] = seed[i]
 
     def state_dict(self):
         state = {"model": self.model.state_dict(), "optimizer": self.optimizer.state_dict(),
-                 "scheduler": self.scheduler.state_dict(), "seed": self.class_seed,
+                 "scheduler": self.scheduler.state_dict(),
                  "generator": self.generator.state_dict(), "discriminator": self.discriminator.state_dict()}
         return state
 

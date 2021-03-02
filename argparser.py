@@ -221,6 +221,13 @@ def get_argparser():
     parser.add_argument("--dyn_iter", default=1000, type=int,
                         help='Iterations for DynWI (Def 1000)')
 
+    parser.add_argument("--gen_use_bkg_loss",  action='store_true', default=False,
+                        help='Use BKG loss for generation (Def False)')
+    parser.add_argument("--gen_lr", default=0.0001, type=float,
+                        help='LR for Generation (Def 1e-4)')
+    parser.add_argument("--gen_iter", default=10000, type=int,
+                        help='Iterations for Generation (Def 1e5)')
+
     # to remove
     parser.add_argument("--pixel_imprinting", action='store_true', default=False,
                         help="Use only a pixel for imprinting when with WI (default: False)")

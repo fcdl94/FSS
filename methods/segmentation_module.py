@@ -75,10 +75,13 @@ class SegmentationModule(nn.Module):
         self.head_channels = head_channels
         self.cls = classifier
 
-    def forward(self, x, use_classifier=True, return_feat=False, return_body=False, only_classifier=False):
+    def forward(self, x, use_classifier=True, return_feat=False, return_body=False,
+                only_classifier=False, only_head=False):
 
         if only_classifier:
             return self.cls(x)
+        elif only_head:
+            return self.cls(self.head(x))
         else:
             x_b = self.body(x)
             if isinstance(x_b, dict):

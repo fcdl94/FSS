@@ -90,7 +90,6 @@ class Trainer:
         self.reduction = HardNegativeMining() if opts.hnm else MeanReduction()
 
         # Feature generation
-        self.generated_criterion = None
         self.gen_weight = 1.
 
         # Feature distillation
@@ -142,7 +141,7 @@ class Trainer:
             # Put the model on GPU
             self.distributed = True
             self.model = DistributedDataParallel(self.model, device_ids=[opts.local_rank],
-                                                 output_device=opts.local_rank, find_unused_parameters=True)
+                                                 output_device=opts.local_rank, find_unused_parameters=False)
 
     def get_classifier(self, is_old=False):
         # here distinguish methods!
@@ -190,6 +189,9 @@ class Trainer:
 
     def cool_down(self, dataset, epochs=1):
         pass
+
+    def generative_loss(self, images=None, labels=None):
+        return 0.
 
     def generate_synth_feat(self, images=None, labels=None):
         return None
@@ -244,10 +246,7 @@ class Trainer:
                         de_loss = self.de_loss * self.de_criterion(feat, feat_old)
                         rloss += de_loss
 
-                if self.generated_criterion is not None:
-                    gen_feat, gen_target = self.generate_synth_feat()
-                    score = model(gen_feat, only_classifier=True)
-                    gloss += self.gen_weight * self.generated_criterion(score, gen_target.to(self.device))
+                gloss += self.generative_loss(images, labels)
 
                 loss = self.reduction(criterion(outputs, labels), labels)
 

@@ -1,9 +1,10 @@
 from .segmentation_module import make_model
 from .trainer import Trainer
 from .imprinting import *
-from .generative import AFHN
+from .generative_AFHN import AFHN
+from .generative import FGI
 
-methods = {"FT", "SPN", "COS", "WI", 'DWI', "AMP", "WG", "GIFS", "LWF", "MIB", "ILT", "RT", "AFHN"}
+methods = {"FT", "SPN", "COS", "WI", 'DWI', "AMP", "WG", "GIFS", "LWF", "MIB", "ILT", "RT", "AFHN", "FGI"}
 
 
 def get_method(opts, task, device, logger):
@@ -22,5 +23,8 @@ def get_method(opts, task, device, logger):
     elif opts.method == 'AFHN':
         opts.method = 'FT'
         return AFHN(task=task, device=device, logger=logger, opts=opts)
+    elif opts.method == 'FGI':
+        opts.method = 'COS'
+        return FGI(task=task, device=device, logger=logger, opts=opts)
     else:
         return Trainer(task=task, device=device, logger=logger, opts=opts)
