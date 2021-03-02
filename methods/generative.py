@@ -156,7 +156,7 @@ class FGI(Trainer):
         with torch.no_grad():
             _, _, feat = model(images, return_feat=True, return_body=True)
         # Downsample labels to match feat size (32x32)
-        labels = F.interpolate(labels.float().unsqueeze(1), size=feat.shape[-2:], mode="nearest").type(torch.uint8)
+        labels = F.interpolate(labels.float().unsqueeze(1), size=feat.shape[-2:], mode="nearest").long()
 
         return feat, labels.squeeze(1)  # get back to B x H x W
 
@@ -181,13 +181,13 @@ class FGI(Trainer):
             cls = cls[cls != 0]  # filter out bkg and void
             cls = cls[cls != 255]
             if len(cls) > 0:
-                p = torch.ones_like(cls) * 1.  # make it float
+                p = torch.ones_like(cls, dtype=torch.float32)  # make it float
                 idx = p.multinomial(num_samples=1)
                 cl = cls[idx]
                 m = torch.eq(lbl[i], cl)
-                mask_feat.append((feat[i]*m).unsqueeze(0))
+                mask_feat.append((feat[i] * m.float()).unsqueeze(0))
                 real_feat.append(feat[i].unsqueeze(0))
-                mask_lbl.append((lbl[i]*m).unsqueeze(0))
+                mask_lbl.append((lbl[i] * m.long()).unsqueeze(0))
                 real_lbl.append((lbl[i]).unsqueeze(0))
         return torch.cat(mask_feat, dim=0), torch.cat(mask_lbl, dim=0).long(), \
                torch.cat(real_feat, dim=0), torch.cat(real_lbl, dim=0).long()

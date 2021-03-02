@@ -200,6 +200,8 @@ def get_argparser():
                         help='The L1 feature loss strength (Def 0.)')
     parser.add_argument("--cos_loss", default=0, type=float,
                         help='The feature loss strength (Def 0.)')
+    parser.add_argument("--bkg_dist", default=0, type=float,
+                        help='The feature loss strength (Def 0.)')
     parser.add_argument("--kl_div", default=False, action='store_true',
                         help='Use true KL loss and not the CE loss.')
     parser.add_argument("--ckd", default=False, action='store_true',

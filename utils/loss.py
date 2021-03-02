@@ -54,6 +54,20 @@ class EntropyLoss(nn.Module):
         return -loss
 
 
+class ClassBkgLoss(nn.Module):
+    def __init__(self, novel_classes):
+        super().__init__()
+        self.novel_classes = novel_classes
+
+    def forward(self, scores, targets):
+
+        loss = scores[:, -self.novel_classes:]
+        loss = loss * (targets == 0).float()
+        loss = loss.sum() / ((targets == 0).sum() * scores.shape[0] * self.novel_classes)
+
+        return loss
+
+
 class CosineKnowledgeDistillationLoss(nn.Module):
     def __init__(self, reduction='mean', norm='L2'):
         super().__init__()
