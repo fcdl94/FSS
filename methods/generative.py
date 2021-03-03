@@ -19,7 +19,7 @@ class FGI(Trainer):
         self.z_dim = 128
         if opts.gen_pixtopix:
             self.generator = GlobalGenerator(self.z_dim+self.dim, self.dim, ngf=64, n_downsampling=2, n_blocks=3,
-                                             norm_layer=partial(nn.InstanceNorm2d, affine=False))
+                                             norm_layer=partial(nn.InstanceNorm2d, affine=False)).to(device)
         else:
             self.generator = FeatGenerator(self.z_dim, self.dim).to(device)
         self.discriminator = DCGANDiscriminator(in_feat=self.dim, dim=256).to(device)
