@@ -50,25 +50,29 @@ class ResnetBlock(nn.Module):
 class GlobalGenerator(nn.Module):
     # def __init__(self, input_nc, output_nc, ngf=64, n_downsampling=3, n_blocks=9, norm_layer=nn.BatchNorm2d,
     #              padding_type='reflect'):
-    def __init__(self, input_nc, output_nc, ngf=64, n_downsampling=2, n_blocks=3, norm_layer=nn.BatchNorm2d,
+    def __init__(self, feat_dim, z_dim, ngf=64, n_downsampling=2, n_blocks=3, norm_layer=nn.BatchNorm2d,
                  padding_type='reflect'):
         assert (n_blocks >= 0)
         super(GlobalGenerator, self).__init__()
+        self.Z_dist = normal.Normal(0, 1)
+        self.z_dim = z_dim
+        input_nc = z_dim + feat_dim
+        output_nc = feat_dim
         activation = nn.ReLU(True)
 
         model = [nn.ReflectionPad2d(3), nn.Conv2d(input_nc, ngf, kernel_size=7, padding=0), norm_layer(ngf), activation]
-        ### downsample
+        # downsample
         for i in range(n_downsampling):
             mult = 2 ** i
             model += [nn.Conv2d(ngf * mult, ngf * mult * 2, kernel_size=3, stride=2, padding=1),
                       norm_layer(ngf * mult * 2), activation]
 
-        ### resnet blocks
+        # resnet blocks
         mult = 2 ** n_downsampling
         for i in range(n_blocks):
             model += [ResnetBlock(ngf * mult, padding_type=padding_type, activation=activation, norm_layer=norm_layer)]
 
-        ### upsample
+        # upsample
         for i in range(n_downsampling):
             mult = 2 ** (n_downsampling - i)
             model += [nn.ConvTranspose2d(ngf * mult, int(ngf * mult / 2), kernel_size=3, stride=2, padding=1,
@@ -77,8 +81,11 @@ class GlobalGenerator(nn.Module):
         model += [nn.ReflectionPad2d(3), nn.Conv2d(ngf, output_nc, kernel_size=7, padding=0)]
         self.model = nn.Sequential(*model)
 
-    def forward(self, input):
-        return self.model(input)
+    def forward(self, x, z=None):
+        if z is None:
+            z = self.Z_dist.sample((x.shape[0], self.z_dim, x.shape[2], x.shape[3]))
+            z = z.to(x.device)
+        return self.model(torch.cat((x, z), dim=1))
 
 
 class FeatGenerator(nn.Module):

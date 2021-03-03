@@ -62,8 +62,9 @@ class ClassBkgLoss(nn.Module):
     def forward(self, scores, targets):
 
         loss = scores[:, -self.novel_classes:]
-        loss = loss * (targets == 0).float()
-        loss = loss.sum() / ((targets == 0).sum() * scores.shape[0] * self.novel_classes)
+        loss = loss.permute(0, 2, 3, 1).flatten(end_dim=2)
+        targets = targets.flatten()
+        loss = loss[targets == 0].mean()
 
         return loss
 
