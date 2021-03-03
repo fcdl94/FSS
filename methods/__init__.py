@@ -3,8 +3,9 @@ from .trainer import Trainer
 from .imprinting import *
 from .generative_AFHN import AFHN
 from .generative import FGI
+from .generative2 import FGI2
 
-methods = {"FT", "SPN", "COS", "WI", 'DWI', "AMP", "WG", "GIFS", "LWF", "MIB", "ILT", "RT", "AFHN", "FGI"}
+methods = {"FT", "SPN", "COS", "WI", 'DWI', "AMP", "WG", "GIFS", "LWF", "MIB", "ILT", "RT", "AFHN", "FGI", "FGI2"}
 
 
 def get_method(opts, task, device, logger):
@@ -26,5 +27,8 @@ def get_method(opts, task, device, logger):
     elif opts.method == 'FGI':
         opts.method = 'COS'
         return FGI(task=task, device=device, logger=logger, opts=opts)
+    elif opts.method == 'FGI2':
+        opts.method = 'COS'
+        return FGI2(task=task, device=device, logger=logger, opts=opts)
     else:
         return Trainer(task=task, device=device, logger=logger, opts=opts)

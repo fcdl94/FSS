@@ -12,9 +12,10 @@ from modules.generators import FeatGenerator, DCGANDiscriminator, GlobalGenerato
 from modules.deeplab import DeeplabV3
 from inplace_abn import InPlaceABN
 from modules.classifier import CosineClassifier
+from torch.distributions import normal
 
 
-class FGI(Trainer):
+class FGI2(Trainer):
     def __init__(self, task, device, logger, opts):
         super().__init__(task, device, logger, opts)
 
@@ -22,12 +23,13 @@ class FGI(Trainer):
         self.z_dim = 128
         self.cond_gan = opts.gen_cond_gan
         self.n_classes = task.get_n_classes()[0]
+        self.Z_dist = normal.Normal(0, 1)
 
         if opts.gen_pixtopix:
-            self.generator = GlobalGenerator(self.z_dim, self.dim, self.dim, ngf=64, n_downsampling=2, n_blocks=3,
+            self.generator = GlobalGenerator(0, self.dim+1, self.dim, ngf=64, n_downsampling=2, n_blocks=3,
                                              norm_layer=partial(nn.InstanceNorm2d, affine=False)).to(device)
         else:
-            self.generator = FeatGenerator(self.z_dim, self.dim, self.dim).to(device)
+            self.generator = FeatGenerator(0, self.dim+1, self.dim).to(device)
         if self.cond_gan:
             self.discriminator = nn.Sequential(
                 DeeplabV3(2048, 256, 256,
@@ -129,8 +131,7 @@ class FGI(Trainer):
                 protos.append(f.view(1, -1))
         return torch.cat(protos, dim=0)
 
-    @staticmethod
-    def mask_features(feat, lbl):
+    def mask_features(self, feat, lbl):
         mask_feat = []
         real_feat = []
         mask_lbl = []
@@ -144,7 +145,12 @@ class FGI(Trainer):
                 idx = p.multinomial(num_samples=1)
                 cl = cls[idx]
                 m = torch.eq(lbl[i], cl)
-                mask_feat.append((feat[i] * m.float()).unsqueeze(0))
+                z = self.Z_dist.sample(feat[i].shape)
+
+                fz = (feat[i] * m.float() + z * (-m + 1).float())
+                mf = torch.cat((fz, m.float()), dim=0)
+                mask_feat.append(mf.unsqueeze(0))
+
                 real_feat.append(feat[i].unsqueeze(0))
                 mask_lbl.append((lbl[i] * m.long()).unsqueeze(0))
                 real_lbl.append((lbl[i]).unsqueeze(0))
@@ -217,7 +223,7 @@ class FGI(Trainer):
                 # Optimize Critic (n times)
                 #
                 for _ in range(self.n_critic):
-                    gen_feat = self.generator(masked_feat)
+                    gen_feat = self.generator(masked_feat, add_z=False)
 
                     if self.cond_gan:   # compute Cond GAN loss
                         discr_loss = criterion(self.discriminator(real_feat), real_lbl)
@@ -240,7 +246,7 @@ class FGI(Trainer):
                 #
                 # Optimize Generator (n times)
                 #
-                gen_feat = self.generator(masked_feat)
+                gen_feat = self.generator(masked_feat, add_z=False
 
                 if self.cond_gan:
                     gen_loss = criterion(self.discriminator(gen_feat), masked_lbl)

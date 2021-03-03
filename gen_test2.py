@@ -19,6 +19,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 from inplace_abn import InPlaceABN
 from modules import DeeplabV3
+from torch.distributions import normal
 
 
 def get_batch(it, dataloader):
@@ -76,6 +77,8 @@ def get_bkg_proto(feat, labels):
 
 
 def mask_features(feat, lbl):
+    Z_dist = normal.Normal(0, 1)
+
     mask_feat = []
     real_feat = []
     mask_lbl = []
@@ -89,7 +92,12 @@ def mask_features(feat, lbl):
             idx = p.multinomial(num_samples=1)
             cl = cls[idx]
             m = torch.eq(lbl[i], cl)
-            mask_feat.append((feat[i] * m.float()).unsqueeze(0))
+            z = Z_dist.sample(feat[i].shape)
+
+            fz = (feat[i] * m.float() + z * (-m+1).float())
+            mf = torch.cat((fz, m.float()), dim=0)
+            mask_feat.append(mf.unsqueeze(0))
+
             real_feat.append(feat[i].unsqueeze(0))
             mask_lbl.append((lbl[i] * m.long()).unsqueeze(0))
             real_lbl.append((lbl[i]).unsqueeze(0))
@@ -114,7 +122,7 @@ def train(dataloader, model, classifier, generator, device, iterations=4000, lr=
         else:
             real_feat, real_lbl = get_real_features(model, images, labels)
             masked_feat, masked_lbl, real_feat, real_lbl = mask_features(real_feat, real_lbl)
-            feat = generator(masked_feat).detach()
+            feat = generator(masked_feat, add_z=False).detach()
             lbl = masked_lbl
 
         score = classifier(feat)
@@ -175,10 +183,10 @@ def main(opts):
     step_ckpt = get_step_ckpt(opts, task_name)
 
     if opts.gen_pixtopix:
-        generator = GlobalGenerator(128, 2048, 2048, ngf=64, n_downsampling=2, n_blocks=3,
+        generator = GlobalGenerator(0, 2048+1, 2048, ngf=64, n_downsampling=2, n_blocks=3,
                                     norm_layer=partial(nn.InstanceNorm2d, affine=False)).to(device)
     else:
-        generator = FeatGenerator(128, 2048, 2048).to(device)
+        generator = FeatGenerator(128, 2048+1, 2048).to(device)
     generator.load_state_dict(step_ckpt['model_state']['generator'])
 
     classifier = CosineClassifier(task.get_n_classes(), channels=opts.n_feat)
