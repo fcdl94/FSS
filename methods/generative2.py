@@ -246,7 +246,7 @@ class FGI2(Trainer):
                 #
                 # Optimize Generator (n times)
                 #
-                gen_feat = self.generator(masked_feat, add_z=False
+                gen_feat = self.generator(masked_feat, add_z=False)
 
                 if self.cond_gan:
                     gen_loss = criterion(self.discriminator(gen_feat), masked_lbl)
