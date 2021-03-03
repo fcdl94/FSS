@@ -101,6 +101,7 @@ def train(dataloader, model, classifier, generator, device, iterations=4000, lr=
     optimizer = torch.optim.SGD(params=classifier.parameters(), lr=lr)
     criterion = nn.CrossEntropyLoss(ignore_index=255, reduction='mean')
 
+    interval = iterations//10
     it = iter(dataloader)
     loss_tot = 0.
 
@@ -125,8 +126,8 @@ def train(dataloader, model, classifier, generator, device, iterations=4000, lr=
 
         loss_tot += loss.item()
 
-        if (i+1) % 10 == 0:
-            print(f"Iter {i+1}: {loss_tot/10:.4f}")
+        if (i+1) % interval == 0:
+            print(f"Iter {i+1}: {loss_tot/interval:.4f}")
             loss_tot = 0.
 
 
@@ -199,7 +200,7 @@ def main(opts):
                   out_stride=opts.output_stride, pooling_size=opts.pooling,
                   pooling=not opts.no_pooling, last_relu=opts.relu),
         CosineClassifier(task.get_n_classes(), channels=opts.n_feat)
-    )
+    ).to(device)
 
     train(train_loader, model.eval(), new_classifier.train(), generator.eval(), device, iterations=4000, lr=0.1)
 
