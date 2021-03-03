@@ -220,8 +220,8 @@ class FGI(Trainer):
                     gen_feat = self.generator(masked_feat)
 
                     if self.cond_gan:   # compute Cond GAN loss
-                        discr_loss = - criterion(self.discriminator(real_feat), real_lbl)
-                        discr_loss += - criterion(self.discriminator(gen_feat), torch.full_like(real_lbl, self.n_classes))
+                        discr_loss = criterion(self.discriminator(real_feat), real_lbl)
+                        discr_loss += criterion(self.discriminator(gen_feat), torch.full_like(real_lbl, self.n_classes))
                         grad_penalty = 0.
                     else:  # calculate normal WGAN loss
                         discr_loss = (self.discriminator(gen_feat) - self.discriminator(real_feat)).mean()
@@ -243,7 +243,7 @@ class FGI(Trainer):
                 gen_feat = self.generator(masked_feat)
 
                 if self.cond_gan:
-                    gen_loss = - criterion(self.discriminator, masked_lbl)
+                    gen_loss = criterion(self.discriminator(gen_feat), masked_lbl)
                 else:
                     gen_loss = - (torch.mean(self.discriminator(gen_feat)))
                 get_tot_loss += gen_loss

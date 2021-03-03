@@ -49,7 +49,6 @@ class FSSDataset(data.Dataset):
             # we filter images containing pixels of unseen classes (slow process but mandatory, I'm sorry).
             idxs = {x for x in range(len(self.full_data))}
             if task.disjoint:
-                print("Filtering the dataset for disjoint training")
                 for cl, img_set in self.full_data.class_to_images.items():
                     if cl not in self.labels and (cl != 0):
                         idxs = idxs.difference(img_set)
