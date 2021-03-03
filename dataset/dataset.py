@@ -48,9 +48,10 @@ class FSSDataset(data.Dataset):
         elif step == 0 or task.nshot == -1:
             # we filter images containing pixels of unseen classes (slow process but mandatory, I'm sorry).
             idxs = {x for x in range(len(self.full_data))}
-            for cl, img_set in self.full_data.class_to_images.items():
-                if cl not in self.labels and (cl != 0):
-                    idxs = idxs.difference(img_set)
+            if task.disjoint:
+                for cl, img_set in self.full_data.class_to_images.items():
+                    if cl not in self.labels and (cl != 0):
+                        idxs = idxs.difference(img_set)
             idxs = list(idxs)
             # this is useful to reorder the labels (not to mask since we already excluded the to-mask classes)
             target_transform = self.get_mapping_transform(self.labels, masking, masking_value)

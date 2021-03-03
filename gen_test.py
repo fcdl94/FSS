@@ -154,8 +154,8 @@ def main(opts):
     print(f"Device: {device}")
 
     task = Task(opts)
+    task.disjoint = False
     task_name = f"{opts.task}-{opts.dataset}"
-    name = opts.name
 
     # Set up random seed
     torch.manual_seed(opts.random_seed)
@@ -181,13 +181,12 @@ def main(opts):
     generator.load_state_dict(step_ckpt['model_state']['generator'])
 
     classifier = CosineClassifier(task.get_n_classes(), channels=opts.n_feat)
-    model = make_model(opts, classifier)
+    model = make_model(opts, classifier).to(device)
     model.load_state_dict(step_ckpt['model_state']['model'])
 
     del step_ckpt
 
     val_metrics = StreamSegMetrics(len(task.get_order()), task.get_n_classes()[0])
-    results = {}
 
     new_classifier = nn.Sequential(
         DeeplabV3(2048, 256, 256,
