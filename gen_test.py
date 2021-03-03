@@ -36,7 +36,7 @@ def get_step_ckpt(opts, task_name):
     if opts.step_ckpt is not None:
         path = opts.step_ckpt
     else:
-        path = f"checkpoints/step/{task_name}/{opts.name}_{opts.step - 1}.pth"
+        path = f"checkpoints/step/{task_name}/{opts.name}_0.pth"
 
     # generate model from path
     if os.path.exists(path):
@@ -182,7 +182,12 @@ def main(opts):
 
     classifier = CosineClassifier(task.get_n_classes(), channels=opts.n_feat)
     model = make_model(opts, classifier).to(device)
-    model.load_state_dict(step_ckpt['model_state']['model'])
+
+    new_state = {}
+    for k, v in step_ckpt['model_state']['model'].items():
+        new_state[k[7:]] = v
+
+    model.load_state_dict(new_state)
 
     del step_ckpt
 
