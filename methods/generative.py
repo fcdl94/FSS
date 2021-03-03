@@ -9,6 +9,9 @@ from torch.autograd import grad as torch_grad
 from torch.autograd import Variable
 import numpy as np
 from modules.generators import FeatGenerator, DCGANDiscriminator, GlobalGenerator
+from modules.deeplab import DeeplabV3
+from inplace_abn import InPlaceABN
+from modules.classifier import CosineClassifier
 
 
 class FGI(Trainer):
@@ -17,12 +20,24 @@ class FGI(Trainer):
 
         self.dim = 2048
         self.z_dim = 128
+        self.cond_gan = opts.gen_cond_gan
+        self.n_classes = task.get_n_classes()[0]
+
         if opts.gen_pixtopix:
             self.generator = GlobalGenerator(self.z_dim, self.dim, ngf=64, n_downsampling=2, n_blocks=3,
                                              norm_layer=partial(nn.InstanceNorm2d, affine=False)).to(device)
         else:
             self.generator = FeatGenerator(self.z_dim, self.dim).to(device)
-        self.discriminator = DCGANDiscriminator(in_feat=self.dim, dim=256).to(device)
+        if self.cond_gan:
+            self.discriminator = nn.Sequential(
+                DeeplabV3(2048, 256, 256,
+                          norm_act=partial(InPlaceABN, activation="leaky_relu", activation_param=.01),
+                          out_stride=opts.output_stride, pooling_size=opts.pooling,
+                          pooling=not opts.no_pooling, last_relu=opts.relu),
+                CosineClassifier([self.n_classes+1], channels=opts.n_feat)
+            ).to(device)
+        else:
+            self.discriminator = DCGANDiscriminator(in_feat=self.dim, dim=256).to(device)
         self.discriminator.train()
 
         self.ITER = opts.gen_iter
@@ -171,6 +186,10 @@ class FGI(Trainer):
             model = self.model if not self.distributed else self.model.module
             model.fix_bn()
             model.eval()
+
+            if self.cond_gan:  # Initialize GAN discriminator with head parameters
+                self.discriminator[0].load_state_dict(model.head.state_dict())
+
             # instance optimizer, criterion and data
             optim_G = torch.optim.Adam(self.generator.parameters(), lr=self.LR)
             optim_D = torch.optim.Adam(self.discriminator.parameters(), lr=self.LR)
@@ -200,11 +219,15 @@ class FGI(Trainer):
                 for _ in range(self.n_critic):
                     gen_feat = self.generator(masked_feat)
 
-                    # calculate normal WGAN loss
-                    discr_loss = (self.discriminator(gen_feat) - self.discriminator(real_feat)).mean()
+                    if self.cond_gan:   # compute Cond GAN loss
+                        discr_loss = - criterion(self.discriminator(real_feat), real_lbl)
+                        discr_loss += - criterion(self.discriminator(gen_feat), torch.full_like(real_lbl, self.n_classes))
+                        grad_penalty = 0.
+                    else:  # calculate normal WGAN loss
+                        discr_loss = (self.discriminator(gen_feat) - self.discriminator(real_feat)).mean()
 
-                    # calculate gradient penalty
-                    grad_penalty = self.lmbda * self._gradient_penalty(real_feat, gen_feat)
+                        # calculate gradient penalty
+                        grad_penalty = self.lmbda * self._gradient_penalty(real_feat, gen_feat)
 
                     # update critic params
                     optim_D.zero_grad()
@@ -218,7 +241,11 @@ class FGI(Trainer):
                 # Optimize Generator (n times)
                 #
                 gen_feat = self.generator(masked_feat)
-                gen_loss = - (torch.mean(self.discriminator(gen_feat)))
+
+                if self.cond_gan:
+                    gen_loss = - criterion(self.discriminator, masked_lbl)
+                else:
+                    gen_loss = - (torch.mean(self.discriminator(gen_feat)))
                 get_tot_loss += gen_loss
 
                 if self.use_cls_loss:

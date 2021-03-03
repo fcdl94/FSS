@@ -61,7 +61,7 @@ class FSSDataset(data.Dataset):
             for cl in self.labels:
                 self.class_to_images[cl] = []
                 for idx in self.full_data.class_to_images[cl]:
-                    if idx in index_map[idx]:
+                    if idx in index_map:
                         self.class_to_images[cl].append(index_map[idx])
 
         else:  # Few Shot Learning
