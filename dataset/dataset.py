@@ -49,6 +49,7 @@ class FSSDataset(data.Dataset):
             # we filter images containing pixels of unseen classes (slow process but mandatory, I'm sorry).
             idxs = {x for x in range(len(self.full_data))}
             if task.disjoint:
+                print("Filtering the dataset for disjoint training")
                 for cl, img_set in self.full_data.class_to_images.items():
                     if cl not in self.labels and (cl != 0):
                         idxs = idxs.difference(img_set)
@@ -56,11 +57,12 @@ class FSSDataset(data.Dataset):
             # this is useful to reorder the labels (not to mask since we already excluded the to-mask classes)
             target_transform = self.get_mapping_transform(self.labels, masking, masking_value)
             # this is helpful in case we need to sample images of some class
+            index_map = {idx: new_idx for new_idx, idx in enumerate(idxs)}
             for cl in self.labels:
                 self.class_to_images[cl] = []
-                for new_idx, idx in enumerate(idxs):
-                    if idx in self.full_data.class_to_images[cl]:
-                        self.class_to_images[cl].append(new_idx)
+                for idx in self.full_data.class_to_images[cl]:
+                    self.class_to_images[cl].append(index_map[idx])
+
         else:  # Few Shot Learning
             self.multi_idxs = True
             idxs = {}

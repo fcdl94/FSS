@@ -227,6 +227,8 @@ def get_argparser():
                         help='Use BKG loss for generation (Def False)')
     parser.add_argument("--gen_lr", default=0.0001, type=float,
                         help='LR for Generation (Def 1e-4)')
+    parser.add_argument("--gen_alpha", default=1., type=float,
+                        help='CrossEntropy Weight (Def 1)')
     parser.add_argument("--gen_iter", default=10000, type=int,
                         help='Iterations for Generation (Def 1e5)')
     parser.add_argument("--gen_pixtopix", action='store_true', default=False,

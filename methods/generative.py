@@ -30,7 +30,7 @@ class FGI(Trainer):
         self.BATCH_SIZE = 10
         self.n_critic = 5
         self.lmbda = 10
-        self.alpha = 1
+        self.alpha = opts.gen_alpha
         self.beta = 1
         self.use_cls_loss = True
         self.use_bkg_loss = opts.gen_use_bkg_loss
