@@ -18,7 +18,7 @@ class FGI(Trainer):
         self.dim = 2048
         self.z_dim = 128
         if opts.gen_pixtopix:
-            self.generator = GlobalGenerator(self.z_dim+self.dim, self.dim, ngf=64, n_downsampling=2, n_blocks=3,
+            self.generator = GlobalGenerator(self.z_dim, self.dim, ngf=64, n_downsampling=2, n_blocks=3,
                                              norm_layer=partial(nn.InstanceNorm2d, affine=False)).to(device)
         else:
             self.generator = FeatGenerator(self.z_dim, self.dim).to(device)

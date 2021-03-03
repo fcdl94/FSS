@@ -50,7 +50,7 @@ class ResnetBlock(nn.Module):
 class GlobalGenerator(nn.Module):
     # def __init__(self, input_nc, output_nc, ngf=64, n_downsampling=3, n_blocks=9, norm_layer=nn.BatchNorm2d,
     #              padding_type='reflect'):
-    def __init__(self, feat_dim, z_dim, ngf=64, n_downsampling=2, n_blocks=3, norm_layer=nn.BatchNorm2d,
+    def __init__(self, z_dim, feat_dim, ngf=64, n_downsampling=2, n_blocks=3, norm_layer=nn.BatchNorm2d,
                  padding_type='reflect'):
         assert (n_blocks >= 0)
         super(GlobalGenerator, self).__init__()

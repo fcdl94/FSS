@@ -174,7 +174,7 @@ def main(opts):
     step_ckpt = get_step_ckpt(opts, task_name)
 
     if opts.gen_pixtopix:
-        generator = GlobalGenerator(128+2048, 2048, ngf=64, n_downsampling=2, n_blocks=3,
+        generator = GlobalGenerator(128, 2048, ngf=64, n_downsampling=2, n_blocks=3,
                                     norm_layer=partial(nn.InstanceNorm2d, affine=False)).to(device)
     else:
         generator = FeatGenerator(128, 2048).to(device)
