@@ -148,10 +148,10 @@ class FGI2(Trainer):
                 idx = p.multinomial(num_samples=1)
                 cl = cls[idx]
                 m = torch.eq(lbl[i], cl)
-                z = self.Z_dist.sample(feat[i].shape)
+                z = self.Z_dist.sample(feat[i].shape).to(self.device)
 
-                fz = (feat[i] * m.float() + z * (-m + 1).float())
-                mf = torch.cat((fz, m.float()), dim=0)
+                fz = (feat[i] * m.float() + z * (-m.float() + 1))
+                mf = torch.cat((fz, m.unsqueeze(0).float()), dim=0)
                 mask_feat.append(mf.unsqueeze(0))
 
                 real_feat.append(feat[i].unsqueeze(0))

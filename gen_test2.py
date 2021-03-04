@@ -76,7 +76,7 @@ def get_bkg_proto(feat, labels):
     return torch.cat(protos, dim=0)
 
 
-def mask_features(feat, lbl):
+def mask_features(feat, lbl, device):
     Z_dist = normal.Normal(0, 1)
 
     mask_feat = []
@@ -92,10 +92,10 @@ def mask_features(feat, lbl):
             idx = p.multinomial(num_samples=1)
             cl = cls[idx]
             m = torch.eq(lbl[i], cl)
-            z = Z_dist.sample(feat[i].shape)
+            z = Z_dist.sample(feat[i].shape).to(device)
 
-            fz = (feat[i] * m.float() + z * (-m+1).float())
-            mf = torch.cat((fz, m.float()), dim=0)
+            fz = (feat[i] * m.float() + z * (-m.float() + 1))
+            mf = torch.cat((fz, m.unsqueeze(0).float()), dim=0)
             mask_feat.append(mf.unsqueeze(0))
 
             real_feat.append(feat[i].unsqueeze(0))
@@ -121,7 +121,7 @@ def train(dataloader, model, classifier, generator, device, iterations=4000, lr=
             feat, lbl = get_real_features(model, images, labels)
         else:
             real_feat, real_lbl = get_real_features(model, images, labels)
-            masked_feat, masked_lbl, real_feat, real_lbl = mask_features(real_feat, real_lbl)
+            masked_feat, masked_lbl, real_feat, real_lbl = mask_features(real_feat, real_lbl, device)
             feat = generator(masked_feat, add_z=False).detach()
             lbl = masked_lbl
 
