@@ -105,21 +105,25 @@ class GlobalGenerator2(nn.Module):
         activation = nn.ReLU(True)
 
         model = [nn.ReflectionPad2d(3), nn.Conv2d(input_nc, ngf, kernel_size=7, padding=0), norm_layer(ngf), activation]
+
+        curr_ngf = ngf
         # downsample
         for i in range(n_downsampling):
-            model += [nn.Conv2d(ngf, ngf, kernel_size=3, stride=2, padding=1),
-                      norm_layer(ngf), activation]
+            model += [nn.Conv2d(curr_ngf,  curr_ngf // 2, kernel_size=3, stride=2, padding=1),
+                      norm_layer(curr_ngf // 2, activation)]
+            curr_ngf = curr_ngf // 2
 
         # resnet blocks
         for i in range(n_blocks):
-            model += [ResnetBlock(ngf, padding_type=padding_type, activation=activation, norm_layer=norm_layer)]
+            model += [ResnetBlock(curr_ngf, padding_type=padding_type, activation=activation, norm_layer=norm_layer)]
 
         # upsample
         for i in range(n_downsampling):
             model += [nn.UpsamplingBilinear2d(scale_factor=2),
-                      nn.Conv2d(ngf, ngf, kernel_size=3, stride=1, padding=1),
-                      norm_layer(ngf), activation]
-        model += [nn.ReflectionPad2d(3), nn.Conv2d(ngf, output_nc, kernel_size=7, padding=0)]
+                      nn.Conv2d(curr_ngf, curr_ngf*2, kernel_size=3, stride=1, padding=1),
+                      norm_layer(curr_ngf*2), activation]
+            curr_ngf = curr_ngf*2
+        model += [nn.ReflectionPad2d(3), nn.Conv2d(curr_ngf, output_nc, kernel_size=7, padding=0)]
         self.model = nn.Sequential(*model)
 
     def forward(self, x, z=None, add_z=True):
