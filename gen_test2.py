@@ -183,10 +183,10 @@ def main(opts):
     step_ckpt = get_step_ckpt(opts, task_name)
 
     if opts.gen_pixtopix:
-        generator = GlobalGenerator(0, 2048+1, 2048, ngf=64, n_downsampling=2, n_blocks=3,
+        generator = GlobalGenerator(0, 2048+1, 2048, ngf=opts.ngf, n_downsampling=2, n_blocks=3,
                                     norm_layer=partial(nn.InstanceNorm2d, affine=False)).to(device)
     elif opts.gen_pixtopix2:
-        generator = GlobalGenerator2(0, 2048+1, 2048, ngf=1024, n_downsampling=2, n_blocks=3,
+        generator = GlobalGenerator2(0, 2048+1, 2048, ngf=opts.ngf, n_downsampling=2, n_blocks=3,
                                      norm_layer=partial(nn.InstanceNorm2d, affine=False)).to(device)
     else:
         generator = FeatGenerator(128, 2048+1, 2048).to(device)

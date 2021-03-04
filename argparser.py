@@ -237,6 +237,8 @@ def get_argparser():
                         help='Use PixToPix Generator2')
     parser.add_argument("--gen_cond_gan", action='store_true', default=False,
                         help='Use Conditional GAN Discriminator')
+    parser.add_argument("--ngf", default=64, type=int,
+                        help='Feature Generator Size (def 64)')
 
     # to remove
     parser.add_argument("--pixel_imprinting", action='store_true', default=False,

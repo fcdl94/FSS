@@ -26,10 +26,10 @@ class FGI2(Trainer):
         self.Z_dist = normal.Normal(0, 1)
 
         if opts.gen_pixtopix:
-            self.generator = GlobalGenerator(0, self.dim+1, self.dim, ngf=64, n_downsampling=2, n_blocks=3,
+            self.generator = GlobalGenerator(0, self.dim+1, self.dim, ngf=opts.ngf, n_downsampling=2, n_blocks=3,
                                              norm_layer=partial(nn.InstanceNorm2d, affine=False)).to(device)
         elif opts.gen_pixtopix2:
-            self.generator = GlobalGenerator2(0, self.dim+1, self.dim, ngf=1024, n_downsampling=2, n_blocks=3,
+            self.generator = GlobalGenerator2(0, self.dim+1, self.dim, ngf=opts.ngf, n_downsampling=2, n_blocks=3,
                                               norm_layer=partial(nn.InstanceNorm2d, affine=False)).to(device)
         else:
             self.generator = FeatGenerator(0, self.dim+1, self.dim).to(device)
