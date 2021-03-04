@@ -8,7 +8,7 @@ from functools import partial
 from torch.autograd import grad as torch_grad
 from torch.autograd import Variable
 import numpy as np
-from modules.generators import FeatGenerator, DCGANDiscriminator, GlobalGenerator
+from modules.generators import FeatGenerator, DCGANDiscriminator, GlobalGenerator, GlobalGenerator2
 from modules.deeplab import DeeplabV3
 from inplace_abn import InPlaceABN
 from modules.classifier import CosineClassifier
@@ -26,6 +26,9 @@ class FGI(Trainer):
         if opts.gen_pixtopix:
             self.generator = GlobalGenerator(self.z_dim, self.dim, self.dim, ngf=64, n_downsampling=2, n_blocks=3,
                                              norm_layer=partial(nn.InstanceNorm2d, affine=False)).to(device)
+        elif opts.gen_pixtopix2:
+            self.generator = GlobalGenerator2(self.z_dim, self.dim, self.dim, ngf=1024, n_downsampling=2, n_blocks=3,
+                                              norm_layer=partial(nn.InstanceNorm2d, affine=False)).to(device)
         else:
             self.generator = FeatGenerator(self.z_dim, self.dim, self.dim).to(device)
         if self.cond_gan:

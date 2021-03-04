@@ -233,6 +233,8 @@ def get_argparser():
                         help='Iterations for Generation (Def 1e5)')
     parser.add_argument("--gen_pixtopix", action='store_true', default=False,
                         help='Use PixToPix Generator')
+    parser.add_argument("--gen_pixtopix2", action='store_true', default=False,
+                        help='Use PixToPix Generator2')
     parser.add_argument("--gen_cond_gan", action='store_true', default=False,
                         help='Use Conditional GAN Discriminator')
 

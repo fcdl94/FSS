@@ -12,7 +12,7 @@ from metrics import StreamSegMetrics
 from task import Task
 
 from modules.classifier import CosineClassifier
-from modules.generators import GlobalGenerator, FeatGenerator
+from modules.generators import GlobalGenerator, FeatGenerator, GlobalGenerator2
 from methods.segmentation_module import make_model
 from functools import partial
 import torch.nn as nn
@@ -177,6 +177,9 @@ def main(opts):
     if opts.gen_pixtopix:
         generator = GlobalGenerator(128, 2048, 2048, ngf=64, n_downsampling=2, n_blocks=3,
                                     norm_layer=partial(nn.InstanceNorm2d, affine=False)).to(device)
+    elif opts.gen_pixtopix2:
+        generator = GlobalGenerator2(128, 2048, 2048, ngf=1024, n_downsampling=2, n_blocks=3,
+                                     norm_layer=partial(nn.InstanceNorm2d, affine=False)).to(device)
     else:
         generator = FeatGenerator(128, 2048, 2048).to(device)
     generator.load_state_dict(step_ckpt['model_state']['generator'])
