@@ -228,7 +228,7 @@ class DynamicWI(Trainer):
                     for c in range(self.task.get_n_classes()[0]):
                         if c == cls:
                             ds = dataset.get_k_image_of_class(cl=cls, k=K)  # get K images of class c
-                            wc = get_prototype(self.model, ds, cls, self.device, return_all=True)
+                            wc = get_prototype(model, ds, cls, self.device, return_all=True)
                             if wc is None:
                                 # print("WC is None!!")
                                 weight[c] = F.normalize(model.cls.cls[0].weight[c], dim=0)
@@ -337,7 +337,7 @@ class TrainedWI(Trainer):
                 state[k[7:]] = v
             model.load_state_dict(state, strict=True)
             model = model.to(self.device)
-            model.body.eval()
+            model.eval()
             for p in model.body.parameters():
                 p.requires_grad = False
 
@@ -358,13 +358,14 @@ class TrainedWI(Trainer):
                 optimizer.zero_grad()
 
                 for e in range(self.EPISODE):
+                    model.eval()
                     weight = torch.zeros_like(model.cls.cls[0].weight)
                     K = random.choice([1, 2, 5])
                     cls = random.choice(classes)  # sample N classes
                     for c in range(self.task.get_n_classes()[0]):
                         if c == cls:
                             ds = dataset.get_k_image_of_class(cl=cls, k=K)  # get K images of class c
-                            wc = get_prototype(self.model, ds, cls, self.device, return_all=True)
+                            wc = get_prototype(model, ds, cls, self.device, return_all=True)
                             if wc is None:
                                 # print("WC is None!!")
                                 weight[c] = F.normalize(model.cls.cls[0].weight[c], dim=0)
@@ -374,6 +375,7 @@ class TrainedWI(Trainer):
                         else:
                             weight[c] = F.normalize(model.cls.cls[0].weight[c], dim=0)
 
+                    model.train()
                     # get a batch of images from dataloader
                     it, batch = get_batch(it, dataloader)
                     ds = dataset.get_k_image_of_class(cl=cls, k=self.BATCH_SIZE)  # get K images of class c
