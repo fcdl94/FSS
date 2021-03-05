@@ -241,6 +241,8 @@ def get_argparser():
                         help='Use Conditional GAN Discriminator')
     parser.add_argument("--gen_mib", action='store_true', default=False,
                         help='Use MiB CrossEntropy on Generator.')
+    parser.add_argument("--gen_nlayer", default=0, type=int,
+                        help='Number of Res layers to use in generator.')
     parser.add_argument("--ngf", default=64, type=int,
                         help='Feature Generator Size (def 64)')
     parser.add_argument("--type2", action='store_true', default=False,

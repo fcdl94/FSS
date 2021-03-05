@@ -136,30 +136,39 @@ class GlobalGenerator2(nn.Module):
 
 
 class FeatGenerator(nn.Module):
-    def __init__(self, z_dim, attr_dim, out_dim, dim=256, norm_layer=nn.InstanceNorm2d):
+    def __init__(self, z_dim, attr_dim, out_dim, dim=256, norm_layer=nn.InstanceNorm2d, n_layer=0):
         super(FeatGenerator, self).__init__()
         self.dim = dim
         self.z_dim = z_dim
         self.Z_dist = normal.Normal(0, 1)
+        activation = nn.LeakyReLU(0.2, inplace=True)
 
-        self.model = nn.Sequential(
-            nn.Conv2d(z_dim+attr_dim, dim, 3, 1, 1, bias=False),  # this is 4,1,1 instead of 4,2,1
-            nn.LeakyReLU(0.2, inplace=True),
+        model = []
+        model += [nn.Conv2d(z_dim+attr_dim, dim, 3, 1, 1, bias=False),  # this is 4,1,1 instead of 4,2,1
+                  norm_layer(dim),
+                  activation]
+
+        for _ in range(n_layer):
+            model += [ResnetBlock(dim, padding_type="zero", activation=activation, norm_layer=norm_layer), activation]
+
+        model += [
             # # state size. (ndf) x 32 x 32
             nn.Conv2d(dim, dim*2, 3, 1, 1, bias=False),
             norm_layer(dim * 2),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*2) x 16 x 16
+            activation,
+            # state size. (ndf*2) x 32 x 32
             nn.Conv2d(dim * 2, dim * 4, 3, 1, 1, bias=False),
             norm_layer(dim * 4),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*4) x 8 x 8
+            activation,
+            # state size. (ndf*4) x 32 x 32
             nn.Conv2d(dim * 4, dim * 8, 3, 1, 1, bias=False),
             norm_layer(dim * 8),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*8) x 4 x 4
-            nn.Conv2d(dim * 8, out_dim, 1, 1, 0, bias=False),
-        )
+            activation,
+            # state size. (ndf*8) x 32 x 32
+            nn.Conv2d(dim * 8, out_dim, 1, 1, 0, bias=False)
+        ]
+
+        self.model = nn.Sequential(*model)
 
     def forward(self, x, z=None, add_z=True):
         if z is None and add_z:
