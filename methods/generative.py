@@ -12,6 +12,7 @@ from modules.generators import FeatGenerator, DCGANDiscriminator, GlobalGenerato
 from modules.deeplab import DeeplabV3
 from inplace_abn import InPlaceABN
 from modules.classifier import CosineClassifier
+from torch.distributions import normal
 
 
 class FGI(Trainer):
@@ -22,15 +23,27 @@ class FGI(Trainer):
         self.z_dim = 128
         self.cond_gan = opts.gen_cond_gan
         self.n_classes = task.get_n_classes()[0]
+        self.Z_dist = normal.Normal(0, 1)
+
+        if not opts.type2:
+            self.z_dim = 128
+            self.in_dim = 2048
+            self.mask_func = self.mask_features1
+            self.add_Z = True
+        else:
+            self.z_dim = 0
+            self.in_dim = 2049
+            self.mask_func = self.mask_features2
+            self.add_Z = False
 
         if opts.gen_pixtopix:
-            self.generator = GlobalGenerator(self.z_dim, self.dim, self.dim, ngf=opts.ngf, n_downsampling=2, n_blocks=3,
+            self.generator = GlobalGenerator(self.z_dim, self.in_dim, self.dim, ngf=opts.ngf, n_downsampling=2, n_blocks=3,
                                              norm_layer=partial(nn.InstanceNorm2d, affine=False)).to(device)
         elif opts.gen_pixtopix2:
-            self.generator = GlobalGenerator2(self.z_dim, self.dim, self.dim, ngf=opts.ngf, n_downsampling=2, n_blocks=3,
+            self.generator = GlobalGenerator2(self.z_dim, self.in_dim, self.dim, ngf=opts.ngf, n_downsampling=2, n_blocks=3,
                                               norm_layer=partial(nn.InstanceNorm2d, affine=False)).to(device)
         else:
-            self.generator = FeatGenerator(self.z_dim, self.dim, self.dim).to(device)
+            self.generator = FeatGenerator(self.z_dim, self.in_dim, self.dim).to(device)
         if self.cond_gan:
             self.discriminator = nn.Sequential(
                 DeeplabV3(2048, 256, 256,
@@ -56,6 +69,10 @@ class FGI(Trainer):
         if task.step > 0:
             self.generated_criterion = nn.CrossEntropyLoss(reduction='mean')
             self.generator.eval()
+        else:
+            self.starting_iter = 0
+            self.optim_G = torch.optim.Adam(self.generator.parameters(), lr=self.LR)
+            self.optim_D = torch.optim.Adam(self.discriminator.parameters(), lr=self.LR)
 
     def warm_up_(self, dataset, epochs=1):
         model = self.model.module if self.distributed else self.model
@@ -107,7 +124,7 @@ class FGI(Trainer):
 
     def generate_synth_feat(self, images=None, labels=None):
         real_feat, real_lbl = self.get_real_features(self.model, images, labels)
-        masked_feat, masked_lbl, real_feat, real_lbl = self.mask_features(real_feat, real_lbl)
+        masked_feat, masked_lbl, real_feat, real_lbl = self.mask_func(real_feat, real_lbl)
 
         gen_feat = self.generator(masked_feat).detach()
 
@@ -132,8 +149,7 @@ class FGI(Trainer):
                 protos.append(f.view(1, -1))
         return torch.cat(protos, dim=0)
 
-    @staticmethod
-    def mask_features(feat, lbl):
+    def mask_features1(self, feat, lbl):
         mask_feat = []
         real_feat = []
         mask_lbl = []
@@ -148,6 +164,32 @@ class FGI(Trainer):
                 cl = cls[idx]
                 m = torch.eq(lbl[i], cl)
                 mask_feat.append((feat[i] * m.float()).unsqueeze(0))
+                real_feat.append(feat[i].unsqueeze(0))
+                mask_lbl.append((lbl[i] * m.long()).unsqueeze(0))
+                real_lbl.append((lbl[i]).unsqueeze(0))
+        return torch.cat(mask_feat, dim=0), torch.cat(mask_lbl, dim=0).long(), \
+               torch.cat(real_feat, dim=0), torch.cat(real_lbl, dim=0).long()
+
+    def mask_features2(self, feat, lbl):
+        mask_feat = []
+        real_feat = []
+        mask_lbl = []
+        real_lbl = []
+        for i in range(feat.shape[0]):  # each image independently
+            cls = lbl[i].unique()
+            cls = cls[cls != 0]  # filter out bkg and void
+            cls = cls[cls != 255]
+            if len(cls) > 0:
+                p = torch.ones_like(cls, dtype=torch.float32)  # make it float
+                idx = p.multinomial(num_samples=1)
+                cl = cls[idx]
+                m = torch.eq(lbl[i], cl)
+                z = self.Z_dist.sample(feat[i].shape).to(self.device)
+
+                fz = (feat[i] * m.float() + z * (-m.float() + 1))
+                mf = torch.cat((fz, m.unsqueeze(0).float()), dim=0)
+                mask_feat.append(mf.unsqueeze(0))
+
                 real_feat.append(feat[i].unsqueeze(0))
                 mask_lbl.append((lbl[i] * m.long()).unsqueeze(0))
                 real_lbl.append((lbl[i]).unsqueeze(0))
@@ -194,8 +236,8 @@ class FGI(Trainer):
                 self.discriminator[0].load_state_dict(model.head.state_dict())
 
             # instance optimizer, criterion and data
-            optim_G = torch.optim.Adam(self.generator.parameters(), lr=self.LR)
-            optim_D = torch.optim.Adam(self.discriminator.parameters(), lr=self.LR)
+            optim_G = self.optim_G
+            optim_D = self.optim_D
 
             criterion = nn.CrossEntropyLoss(ignore_index=255, reduction='mean')
 
@@ -207,7 +249,7 @@ class FGI(Trainer):
             class_loss = 0.
             ar_loss = 0.
 
-            for i in range(self.ITER):
+            for i in range(self.starting_iter, self.ITER):
                 it, batch = get_batch(it, dataloader)
                 images, labels = batch[0].to(self.device), batch[1].to(self.device)
                 real_feat, real_lbl, = self.get_real_features(model, images, labels)
@@ -220,7 +262,7 @@ class FGI(Trainer):
                 # Optimize Critic (n times)
                 #
                 for _ in range(self.n_critic):
-                    gen_feat = self.generator(masked_feat)
+                    gen_feat = self.generator(masked_feat, add_z=self.add_Z)
 
                     if self.cond_gan:   # compute Cond GAN loss
                         discr_loss = criterion(self.discriminator(real_feat), real_lbl)
@@ -243,7 +285,7 @@ class FGI(Trainer):
                 #
                 # Optimize Generator (n times)
                 #
-                gen_feat = self.generator(masked_feat)
+                gen_feat = self.generator(masked_feat, add_z=self.add_Z)
 
                 if self.cond_gan:
                     gen_loss = criterion(self.discriminator(gen_feat), masked_lbl)
@@ -282,15 +324,22 @@ class FGI(Trainer):
     def load_state_dict(self, checkpoint, strict=True):
         super().load_state_dict(checkpoint, strict)
         if self.step > 0:
+            assert 'generator' in checkpoint, "Error, generator is not in checkpoint."
+        if 'generator' in checkpoint:
             self.generator.load_state_dict(checkpoint['generator'])
             self.generator.to(self.device)
             self.discriminator.load_state_dict(checkpoint['discriminator'])
             self.discriminator.to(self.device)
+            if "iter" in checkpoint:
+                self.starting_iter = checkpoint['iter']
+                self.optim_G.load_state_dict(checkpoint['optim_G'])
+                self.optim_D.load_state_dict(checkpoint['optim_D'])
 
     def state_dict(self):
         state = {"model": self.model.state_dict(), "optimizer": self.optimizer.state_dict(),
                  "scheduler": self.scheduler.state_dict(),
-                 "generator": self.generator.state_dict(), "discriminator": self.discriminator.state_dict()}
+                 "generator": self.generator.state_dict(), "discriminator": self.discriminator.state_dict(),
+                 "iter": self.ITER, "optim_G": self.optim_G.state_dict(), "optim_D": self.optim_D.state_dict()}
         return state
 
 

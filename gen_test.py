@@ -19,6 +19,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 from inplace_abn import InPlaceABN
 from modules import DeeplabV3
+from torch.distributions import normal
 
 
 def get_batch(it, dataloader):
@@ -75,7 +76,36 @@ def get_bkg_proto(feat, labels):
     return torch.cat(protos, dim=0)
 
 
-def mask_features(feat, lbl):
+def mask_features2(feat, lbl, device):
+    Z_dist = normal.Normal(0, 1)
+
+    mask_feat = []
+    real_feat = []
+    mask_lbl = []
+    real_lbl = []
+    for i in range(feat.shape[0]):  # each image independently
+        cls = lbl[i].unique()
+        cls = cls[cls != 0]  # filter out bkg and void
+        cls = cls[cls != 255]
+        if len(cls) > 0:
+            p = torch.ones_like(cls, dtype=torch.float32)  # make it float
+            idx = p.multinomial(num_samples=1)
+            cl = cls[idx]
+            m = torch.eq(lbl[i], cl)
+            z = Z_dist.sample(feat[i].shape).to(device)
+
+            fz = (feat[i] * m.float() + z * (-m.float() + 1))
+            mf = torch.cat((fz, m.unsqueeze(0).float()), dim=0)
+            mask_feat.append(mf.unsqueeze(0))
+
+            real_feat.append(feat[i].unsqueeze(0))
+            mask_lbl.append((lbl[i] * m.long()).unsqueeze(0))
+            real_lbl.append((lbl[i]).unsqueeze(0))
+    return torch.cat(mask_feat, dim=0), torch.cat(mask_lbl, dim=0).long(), \
+           torch.cat(real_feat, dim=0), torch.cat(real_lbl, dim=0).long()
+
+
+def mask_features1(feat, lbl):
     mask_feat = []
     real_feat = []
     mask_lbl = []
@@ -97,7 +127,7 @@ def mask_features(feat, lbl):
            torch.cat(real_feat, dim=0), torch.cat(real_lbl, dim=0).long()
 
 
-def train(dataloader, model, classifier, generator, device, iterations=4000, lr=0.1, real=False):
+def train(dataloader, model, classifier, generator, device, iterations=4000, lr=0.1, real=False, type=1):
     optimizer = torch.optim.SGD(params=classifier.parameters(), lr=lr)
     criterion = nn.CrossEntropyLoss(ignore_index=255, reduction='mean')
 
@@ -113,8 +143,12 @@ def train(dataloader, model, classifier, generator, device, iterations=4000, lr=
             feat, lbl = get_real_features(model, images, labels)
         else:
             real_feat, real_lbl = get_real_features(model, images, labels)
-            masked_feat, masked_lbl, real_feat, real_lbl = mask_features(real_feat, real_lbl)
-            feat = generator(masked_feat).detach()
+            if type == 1:
+                masked_feat, masked_lbl, real_feat, real_lbl = mask_features1(real_feat, real_lbl)
+            else:
+                masked_feat, masked_lbl, real_feat, real_lbl = mask_features2(real_feat, real_lbl, device)
+
+            feat = generator(masked_feat, add_z=(type == 1)).detach()
             lbl = masked_lbl
 
         score = classifier(feat)
@@ -174,14 +208,23 @@ def main(opts):
 
     step_ckpt = get_step_ckpt(opts, task_name)
 
+    if not opts.type2:
+        z_dim = 128
+        in_dim = 2048
+        type=1
+    else:
+        z_dim = 0
+        in_dim = 2049
+        type=2
+
     if opts.gen_pixtopix:
-        generator = GlobalGenerator(128, 2048, 2048, ngf=opts.ngf, n_downsampling=2, n_blocks=3,
+        generator = GlobalGenerator(z_dim, in_dim, 2048, ngf=opts.ngf, n_downsampling=2, n_blocks=3,
                                     norm_layer=partial(nn.InstanceNorm2d, affine=False)).to(device)
     elif opts.gen_pixtopix2:
-        generator = GlobalGenerator2(128, 2048, 2048, ngf=opts.ngf, n_downsampling=2, n_blocks=3,
+        generator = GlobalGenerator2(z_dim, in_dim, 2048, ngf=opts.ngf, n_downsampling=2, n_blocks=3,
                                      norm_layer=partial(nn.InstanceNorm2d, affine=False)).to(device)
     else:
-        generator = FeatGenerator(128, 2048, 2048).to(device)
+        generator = FeatGenerator(z_dim, in_dim, 2048).to(device)
     generator.load_state_dict(step_ckpt['model_state']['generator'])
 
     classifier = CosineClassifier(task.get_n_classes(), channels=opts.n_feat)
@@ -205,7 +248,7 @@ def main(opts):
         CosineClassifier(task.get_n_classes(), channels=opts.n_feat)
     ).to(device)
 
-    train(train_loader, model.eval(), new_classifier.train(), generator.eval(), device, iterations=4000, lr=0.1)
+    train(train_loader, model.eval(), new_classifier.train(), generator.eval(), device, iterations=4000, lr=0.1, type=type)
 
     model.head = new_classifier[0]
     model.cls = new_classifier[1]

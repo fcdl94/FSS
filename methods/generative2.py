@@ -58,6 +58,10 @@ class FGI2(Trainer):
         if task.step > 0:
             self.generated_criterion = nn.CrossEntropyLoss(reduction='mean')
             self.generator.eval()
+        else:
+            self.starting_iter = 0
+            self.optim_G = torch.optim.Adam(self.generator.parameters(), lr=self.LR)
+            self.optim_D = torch.optim.Adam(self.discriminator.parameters(), lr=self.LR)
 
     def warm_up_(self, dataset, epochs=1):
         model = self.model.module if self.distributed else self.model
@@ -200,8 +204,8 @@ class FGI2(Trainer):
                 self.discriminator[0].load_state_dict(model.head.state_dict())
 
             # instance optimizer, criterion and data
-            optim_G = torch.optim.Adam(self.generator.parameters(), lr=self.LR)
-            optim_D = torch.optim.Adam(self.discriminator.parameters(), lr=self.LR)
+            optim_G = self.optim_G
+            optim_D = self.optim_D
 
             criterion = nn.CrossEntropyLoss(ignore_index=255, reduction='mean')
 
@@ -213,7 +217,7 @@ class FGI2(Trainer):
             class_loss = 0.
             ar_loss = 0.
 
-            for i in range(self.ITER):
+            for i in range(self.starting_iter, self.ITER):
                 it, batch = get_batch(it, dataloader)
                 images, labels = batch[0].to(self.device), batch[1].to(self.device)
                 real_feat, real_lbl, = self.get_real_features(model, images, labels)
@@ -292,11 +296,15 @@ class FGI2(Trainer):
             self.generator.to(self.device)
             self.discriminator.load_state_dict(checkpoint['discriminator'])
             self.discriminator.to(self.device)
+            if "iter" in checkpoint:
+                self.starting_iter = checkpoint['iter']
+                self.optim_G.load_state_dict(checkpoint['optim_G'])
+                self.optim_D.load_state_dict(checkpoint['optim_D'])
 
     def state_dict(self):
         state = {"model": self.model.state_dict(), "optimizer": self.optimizer.state_dict(),
                  "scheduler": self.scheduler.state_dict(),
-                 "generator": self.generator.state_dict(), "discriminator": self.discriminator.state_dict()}
+                 "generator": self.generator.state_dict(), "discriminator": self.discriminator.state_dict(),
+                 "iter": self.ITER, "optim_G": self.optim_G.state_dict(), "optim_D": self.optim_D.state_dict()}
         return state
-
 

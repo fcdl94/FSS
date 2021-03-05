@@ -239,7 +239,8 @@ def get_argparser():
                         help='Use Conditional GAN Discriminator')
     parser.add_argument("--ngf", default=64, type=int,
                         help='Feature Generator Size (def 64)')
-
+    parser.add_argument("--type2", action='store_true', default=False,
+                        help='Use second type of noise addition.')
     # to remove
     parser.add_argument("--pixel_imprinting", action='store_true', default=False,
                         help="Use only a pixel for imprinting when with WI (default: False)")
