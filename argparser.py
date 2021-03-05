@@ -225,8 +225,8 @@ def get_argparser():
 
     parser.add_argument("--gen_use_bkg_loss",  action='store_true', default=False,
                         help='Use BKG loss for generation (Def False)')
-    parser.add_argument("--gen_lr", default=0.0001, type=float,
-                        help='LR for Generation (Def 1e-4)')
+    parser.add_argument("--gen_lr", default=0.00001, type=float,
+                        help='LR for Generation (Def 1e-5)')
     parser.add_argument("--gen_alpha", default=1., type=float,
                         help='CrossEntropy Weight (Def 1)')
     parser.add_argument("--gen_iter", default=10000, type=int,
@@ -235,8 +235,6 @@ def get_argparser():
                         help='Number of critic iterations (Def 5)')
     parser.add_argument("--gen_pixtopix", action='store_true', default=False,
                         help='Use PixToPix Generator')
-    parser.add_argument("--gen_pixtopix2", action='store_true', default=False,
-                        help='Use PixToPix Generator2')
     parser.add_argument("--gen_cond_gan", action='store_true', default=False,
                         help='Use Conditional GAN Discriminator')
     parser.add_argument("--gen_mib", action='store_true', default=False,

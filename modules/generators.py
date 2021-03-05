@@ -145,7 +145,6 @@ class FeatGenerator(nn.Module):
 
         model = []
         model += [nn.Conv2d(z_dim+attr_dim, dim, 3, 1, 1, bias=False),  # this is 4,1,1 instead of 4,2,1
-                  norm_layer(dim),
                   activation]
 
         for _ in range(n_layer):
