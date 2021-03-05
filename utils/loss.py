@@ -146,6 +146,27 @@ class UnbiasedCrossEntropy(nn.Module):
         return loss
 
 
+# Generator Loss
+class BinaryCrossEntropy(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, inputs, targets):
+
+        loss = 0.
+        count = 0
+        den = torch.logsumexp(inputs, dim=1)  # B, H, W       den of softmax
+        for i in range(len(inputs)):
+            cls = torch.unique(targets[i])
+            if len(cls) > 1:
+                cls = cls[cls != 0][0]
+                mask = ((targets[i] == cls).float() * 2) - 1  # mask is -1 when no class, 1 otherwise
+                loss += - (mask * (inputs[i, cls] - den[i])).mean()
+                count += 1
+
+        return loss / count if count > 0 else 0.
+
+
 class UnbiasedKnowledgeDistillationLoss(nn.Module):
     def __init__(self, reduction='mean', alpha=1.):
         super().__init__()

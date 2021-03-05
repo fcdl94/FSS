@@ -13,6 +13,7 @@ from modules.deeplab import DeeplabV3
 from inplace_abn import InPlaceABN
 from modules.classifier import CosineClassifier
 from torch.distributions import normal
+from utils.loss import BinaryCrossEntropy
 
 
 class FGI(Trainer):
@@ -65,6 +66,7 @@ class FGI(Trainer):
         self.beta = 1
         self.use_cls_loss = True
         self.use_bkg_loss = opts.gen_use_bkg_loss
+        self.gen_mib = opts.gen_mib
 
         if task.step > 0:
             self.generated_criterion = nn.CrossEntropyLoss(reduction='mean')
@@ -240,6 +242,10 @@ class FGI(Trainer):
             optim_D = self.optim_D
 
             criterion = nn.CrossEntropyLoss(ignore_index=255, reduction='mean')
+            if self.gen_mib:
+                criterion_gen = BinaryCrossEntropy()
+            else:
+                criterion_gen = nn.CrossEntropyLoss(ignore_index=255, reduction='mean')
 
             dataloader = data.DataLoader(dataset, batch_size=min(self.BATCH_SIZE, len(dataset)), shuffle=True,
                                          num_workers=4, drop_last=True)
@@ -254,7 +260,8 @@ class FGI(Trainer):
                 images, labels = batch[0].to(self.device), batch[1].to(self.device)
                 real_feat, real_lbl, = self.get_real_features(model, images, labels)
                 masked_feat, masked_lbl, real_feat, real_lbl = self.mask_func(real_feat, real_lbl)
-                mask = -(masked_lbl == 0).long() + 1
+                mask = -(masked_lbl == 0).float() + 1
+                mask = mask.unsqueeze(1)
 
                 total_discr_loss = 0.
                 total_grad_penalty = 0.
@@ -291,7 +298,7 @@ class FGI(Trainer):
                 gen_feat = self.generator(masked_feat, add_z=self.add_Z)
 
                 if self.cond_gan:
-                    gen_loss = criterion(self.discriminator(gen_feat), masked_lbl)
+                    gen_loss = criterion_gen(self.discriminator(gen_feat), masked_lbl)
                 else:
                     gf = torch.cat((gen_feat, mask), dim=1)
                     gen_loss = - (torch.mean(self.discriminator(gf)))
@@ -300,7 +307,7 @@ class FGI(Trainer):
                 if self.use_cls_loss:
                     classifier = nn.Sequential(model.head, model.cls)
                     score = classifier(gen_feat)
-                    class_loss = criterion(score, masked_lbl)
+                    class_loss = criterion_gen(score, masked_lbl)
                     get_tot_loss += self.alpha * class_loss
 
                 if self.use_bkg_loss:
