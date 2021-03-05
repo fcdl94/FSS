@@ -40,9 +40,6 @@ class FGI(Trainer):
         if opts.gen_pixtopix:
             self.generator = GlobalGenerator(self.z_dim, self.in_dim, self.dim, ngf=opts.ngf, n_downsampling=2, n_blocks=3,
                                              norm_layer=partial(nn.InstanceNorm2d, affine=False)).to(device)
-        elif opts.gen_pixtopix2:
-            self.generator = GlobalGenerator2(self.z_dim, self.in_dim, self.dim, ngf=opts.ngf, n_downsampling=2, n_blocks=3,
-                                              norm_layer=partial(nn.InstanceNorm2d, affine=False)).to(device)
         else:
             self.generator = FeatGenerator(self.z_dim, self.in_dim, self.dim, n_layer=opts.gen_nlayer).to(device)
         if self.cond_gan:

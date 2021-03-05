@@ -20,6 +20,7 @@ from torch.nn import functional as F
 from inplace_abn import InPlaceABN
 from modules import DeeplabV3
 from torch.distributions import normal
+from utils.loss import BinaryCrossEntropy
 
 
 def get_batch(it, dataloader):
@@ -127,9 +128,12 @@ def mask_features1(feat, lbl):
            torch.cat(real_feat, dim=0), torch.cat(real_lbl, dim=0).long()
 
 
-def train(dataloader, model, classifier, generator, device, iterations=4000, lr=0.1, real=False, type=1):
+def train(dataloader, model, classifier, generator, device, iterations=4000, lr=0.1, real=False, type=1, bce=False):
     optimizer = torch.optim.SGD(params=classifier.parameters(), lr=lr)
-    criterion = nn.CrossEntropyLoss(ignore_index=255, reduction='mean')
+    if not bce:
+        criterion = nn.CrossEntropyLoss(ignore_index=255, reduction='mean')
+    else:
+        criterion = BinaryCrossEntropy()
 
     interval = iterations//10
     it = iter(dataloader)
@@ -220,9 +224,6 @@ def main(opts):
     if opts.gen_pixtopix:
         generator = GlobalGenerator(z_dim, in_dim, 2048, ngf=opts.ngf, n_downsampling=2, n_blocks=3,
                                     norm_layer=partial(nn.InstanceNorm2d, affine=False)).to(device)
-    elif opts.gen_pixtopix2:
-        generator = GlobalGenerator2(z_dim, in_dim, 2048, ngf=opts.ngf, n_downsampling=2, n_blocks=3,
-                                     norm_layer=partial(nn.InstanceNorm2d, affine=False)).to(device)
     else:
         generator = FeatGenerator(z_dim, in_dim, 2048, n_layer=opts.gen_nlayer).to(device)
     generator.load_state_dict(step_ckpt['model_state']['generator'])
@@ -248,7 +249,8 @@ def main(opts):
         CosineClassifier(task.get_n_classes(), channels=opts.n_feat)
     ).to(device)
 
-    train(train_loader, model.eval(), new_classifier.train(), generator.eval(), device, iterations=4000, lr=0.1, type=type)
+    train(train_loader, model.eval(), new_classifier.train(), generator.eval(), device, iterations=4000,
+          lr=0.1, type=type, bce=opts.gen_mib)
 
     model.head = new_classifier[0]
     model.cls = new_classifier[1]
