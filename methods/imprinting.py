@@ -358,7 +358,6 @@ class TrainedWI(Trainer):
                 optimizer.zero_grad()
 
                 for e in range(self.EPISODE):
-                    model.eval()
                     weight = torch.zeros_like(model.cls.cls[0].weight)
                     K = random.choice([1, 2, 5])
                     cls = random.choice(classes)  # sample N classes
@@ -375,7 +374,6 @@ class TrainedWI(Trainer):
                         else:
                             weight[c] = F.normalize(model.cls.cls[0].weight[c], dim=0)
 
-                    model.train()
                     # get a batch of images from dataloader
                     it, batch = get_batch(it, dataloader)
                     ds = dataset.get_k_image_of_class(cl=cls, k=self.BATCH_SIZE)  # get K images of class c
@@ -397,7 +395,7 @@ class TrainedWI(Trainer):
 
                 self.logger.add_scalar("loss_cool_down", loss_step / self.EPISODE, i + 1)
                 loss_tot += loss_step / self.EPISODE
-                if (i % 10) == 0:
+                if ((i+1) % 10) == 0:
                     self.logger.info(f"Cool down loss at iter {i + 1}: {loss_tot / 10}")
                     loss_tot = 0
 
@@ -411,16 +409,11 @@ class TrainedWI(Trainer):
 
     def load_state_dict(self, checkpoint, strict=True):
         super().load_state_dict(checkpoint, strict)
-        if self.step > 0:
-            self.weights.load_state_dict(checkpoint['weights'])
-            self.weights.to(self.device)
 
     def state_dict(self):
         state = {"model": self.model.state_dict(), "optimizer": self.optimizer.state_dict(),
-                 "scheduler": self.scheduler.state_dict(),
-                 "weights": self.weights.state_dict()}
+                 "scheduler": self.scheduler.state_dict()}
         return state
-
 
 
 class WeightGeneratorModule(nn.Module):
