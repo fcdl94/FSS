@@ -231,6 +231,8 @@ def get_argparser():
                         help='CrossEntropy Weight (Def 1)')
     parser.add_argument("--gen_iter", default=10000, type=int,
                         help='Iterations for Generation (Def 1e5)')
+    parser.add_argument("--gen_ncritic", default=5, type=int,
+                        help='Number of critic iterations (Def 5)')
     parser.add_argument("--gen_pixtopix", action='store_true', default=False,
                         help='Use PixToPix Generator')
     parser.add_argument("--gen_pixtopix2", action='store_true', default=False,

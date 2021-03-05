@@ -53,13 +53,13 @@ class FGI(Trainer):
                 CosineClassifier([self.n_classes+1], channels=opts.n_feat)
             ).to(device)
         else:
-            self.discriminator = DCGANDiscriminator(in_feat=self.dim, dim=256).to(device)
+            self.discriminator = DCGANDiscriminator(in_feat=self.dim+1, dim=256).to(device)
         self.discriminator.train()
 
         self.ITER = opts.gen_iter
         self.LR = opts.gen_lr
         self.BATCH_SIZE = 10
-        self.n_critic = 5
+        self.n_critic = opts.gen_ncritic
         self.lmbda = 10
         self.alpha = opts.gen_alpha
         self.beta = 1
@@ -254,6 +254,7 @@ class FGI(Trainer):
                 images, labels = batch[0].to(self.device), batch[1].to(self.device)
                 real_feat, real_lbl, = self.get_real_features(model, images, labels)
                 masked_feat, masked_lbl, real_feat, real_lbl = self.mask_func(real_feat, real_lbl)
+                mask = -(masked_lbl == 0).long() + 1
 
                 total_discr_loss = 0.
                 total_grad_penalty = 0.
@@ -269,10 +270,12 @@ class FGI(Trainer):
                         discr_loss += criterion(self.discriminator(gen_feat), torch.full_like(real_lbl, self.n_classes))
                         grad_penalty = 0.
                     else:  # calculate normal WGAN loss
-                        discr_loss = (self.discriminator(gen_feat) - self.discriminator(real_feat)).mean()
+                        rf = torch.cat((real_feat, mask), dim=1)
+                        gf = torch.cat((gen_feat, mask), dim=1)
+                        discr_loss = (self.discriminator(gf) - self.discriminator(rf)).mean()
 
                         # calculate gradient penalty
-                        grad_penalty = self.lmbda * self._gradient_penalty(real_feat, gen_feat)
+                        grad_penalty = self.lmbda * self._gradient_penalty(rf, gf)
 
                     # update critic params
                     optim_D.zero_grad()
@@ -290,7 +293,8 @@ class FGI(Trainer):
                 if self.cond_gan:
                     gen_loss = criterion(self.discriminator(gen_feat), masked_lbl)
                 else:
-                    gen_loss = - (torch.mean(self.discriminator(gen_feat)))
+                    gf = torch.cat((gen_feat, mask), dim=1)
+                    gen_loss = - (torch.mean(self.discriminator(gf)))
                 get_tot_loss += gen_loss
 
                 if self.use_cls_loss:
