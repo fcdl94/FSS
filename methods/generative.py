@@ -253,7 +253,7 @@ class FGI(Trainer):
                 it, batch = get_batch(it, dataloader)
                 images, labels = batch[0].to(self.device), batch[1].to(self.device)
                 real_feat, real_lbl, = self.get_real_features(model, images, labels)
-                masked_feat, masked_lbl, real_feat, real_lbl = self.mask_features(real_feat, real_lbl)
+                masked_feat, masked_lbl, real_feat, real_lbl = self.mask_func(real_feat, real_lbl)
 
                 total_discr_loss = 0.
                 total_grad_penalty = 0.

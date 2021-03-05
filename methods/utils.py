@@ -33,32 +33,31 @@ def get_batch(it, dataloader):
 def get_prototype(model, ds, cl, device, interpolate_label=True, return_all=False, background=False):
     protos = []
     bkg_proto = []
-    with torch.no_grad():
-        for img, lbl in ds:
-            img, lbl = img.to(device), lbl.to(device)
-            out = model(img.unsqueeze(0), use_classifier=False).detach()
-            if interpolate_label:  # to match output size
-                lbl = F.interpolate(lbl.float().view(1, 1, lbl.shape[0], lbl.shape[1]),
-                                    size=out.shape[-2:], mode="nearest").view(out.shape[-2:]).type(torch.uint8)
-            else:  # interpolate output to match label size
-                out = F.interpolate(out, size=img.shape[-2:], mode="bilinear", align_corners=False)
-            out = out.squeeze(0)
-            out = out.view(out.shape[0], -1).t()  # (HxW) x F
-            lbl = lbl.flatten()  # Now it is (HxW)
-            if (lbl == cl).float().sum() > 0 and (lbl != cl).float().sum() > 0:
-                protos.append(norm_mean(out[lbl == cl, :]))
-                bkg_proto.append(norm_mean(out[lbl != cl, :]))
+    for img, lbl in ds:
+        img, lbl = img.to(device), lbl.to(device)
+        out = model(img.unsqueeze(0), use_classifier=False)
+        if interpolate_label:  # to match output size
+            lbl = F.interpolate(lbl.float().view(1, 1, lbl.shape[0], lbl.shape[1]),
+                                size=out.shape[-2:], mode="nearest").view(out.shape[-2:]).type(torch.uint8)
+        else:  # interpolate output to match label size
+            out = F.interpolate(out, size=img.shape[-2:], mode="bilinear", align_corners=False)
+        out = out.squeeze(0)
+        out = out.view(out.shape[0], -1).t()  # (HxW) x F
+        lbl = lbl.flatten()  # Now it is (HxW)
+        if (lbl == cl).float().sum() > 0 and (lbl != cl).float().sum() > 0:
+            protos.append(norm_mean(out[lbl == cl, :]))
+            bkg_proto.append(norm_mean(out[lbl != cl, :]))
 
-        if len(protos) > 0:
-            protos = torch.cat(protos, dim=0)
-            bkg_proto = torch.cat(bkg_proto, dim=0)
+    if len(protos) > 0:
+        protos = torch.cat(protos, dim=0)
+        bkg_proto = torch.cat(bkg_proto, dim=0)
 
-            if return_all:
-                return protos if not background else (protos, bkg_proto)
+        if return_all:
+            return protos if not background else (protos, bkg_proto)
 
-            return protos.mean(dim=0) if not background else (protos.mean(dim=0), bkg_proto.mean(dim=0))
-        else:
-            return None
+        return protos.mean(dim=0) if not background else (protos.mean(dim=0), bkg_proto.mean(dim=0))
+    else:
+        return None
 
 
 def norm_mean(x):
