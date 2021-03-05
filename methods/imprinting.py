@@ -299,7 +299,7 @@ class TrainedWI(Trainer):
     def compute_weight(self, inp):
         # input is a D dimensional prototype
         if self.normalize:
-            inp = F.normalize(F, dim=0)
+            inp = F.normalize(inp, dim=0)
         weight = inp.mean(dim=0).view(-1, 1, 1)
         return weight
 
@@ -314,15 +314,15 @@ class TrainedWI(Trainer):
         for c in new_classes:
             weight = None
             count = 0
-            while weight is None and count < 10:
-                ds = dataset.get_k_image_of_class(cl=c, k=self.task.nshot)  # get K images of class c
-                wc = get_prototype(model, ds, c, self.device, interpolate_label=False, return_all=True)
-                if wc is not None:
-                    weight = self.compute_weight(wc)
-                count += 1
+            with torch.no_grad():
+                while weight is None and count < 10:
+                    ds = dataset.get_k_image_of_class(cl=c, k=self.task.nshot)  # get K images of class c
+                    wc = get_prototype(model, ds, c, self.device, interpolate_label=False, return_all=True)
+                    if wc is not None:
+                        weight = self.compute_weight(wc)
+                    count += 1
 
             if weight is not None:
-                weight.detach_()
                 model.cls.imprint_weights_class(weight, c)
             else:
                 raise Exception(f"Unable to imprint weight of class {c} after {count} trials.")
