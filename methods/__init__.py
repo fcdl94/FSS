@@ -4,7 +4,8 @@ from .imprinting import *
 from .generative_AFHN import AFHN
 from .generative import FGI
 
-methods = {"FT", "SPN", "COS", "WI", 'DWI', "AMP", "WG", "GIFS", "LWF", "MIB", "ILT", "RT", "AFHN", "FGI", "FGI2"}
+methods = {"FT", "SPN", "COS", "WI", 'DWI', "TWI", "AMP", "WG",
+           "GIFS", "LWF", "MIB", "ILT", "RT", "AFHN", "FGI", "FGI2"}
 
 
 def get_method(opts, task, device, logger):
@@ -17,6 +18,9 @@ def get_method(opts, task, device, logger):
     elif opts.method == 'DWI':
         opts.method = 'COS'
         return DynamicWI(task=task, device=device, logger=logger, opts=opts)
+    elif opts.method == 'TWI':
+        opts.method = 'COS'
+        return TrainedWI(task=task, device=device, logger=logger, opts=opts)
     elif opts.method == 'AMP':
         opts.method = 'FT'
         return AMP(task=task, device=device, logger=logger, opts=opts)
@@ -25,11 +29,11 @@ def get_method(opts, task, device, logger):
         return AFHN(task=task, device=device, logger=logger, opts=opts)
     elif opts.method == 'FGI':
         opts.method = 'COS'
-        opts.cat_noise = True
+        opts.sum_noise = True
         return FGI(task=task, device=device, logger=logger, opts=opts)
     elif opts.method == 'FGI2':
         opts.method = 'COS'
-        opts.cat_noise = False
+        opts.sum_noise = False
         return FGI(task=task, device=device, logger=logger, opts=opts)
     else:
         return Trainer(task=task, device=device, logger=logger, opts=opts)
