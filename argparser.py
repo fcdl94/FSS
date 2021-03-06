@@ -52,6 +52,9 @@ def modify_command_options(opts):
     opts.crop_size_test = 500 if opts.dataset == "voc" else 640
     opts.test_batch_size = 1
 
+    if opts.type2:
+        opts.type = 2
+
     return opts
 
 
@@ -246,6 +249,8 @@ def get_argparser():
     parser.add_argument("--ngf", default=64, type=int,
                         help='Feature Generator Size (def 64)')
     parser.add_argument("--type", default=1, type=int,
+                        help='Type of generator input.')
+    parser.add_argument("--type2", default=False, action='store_true',
                         help='Type of generator input.')
     # to remove
     parser.add_argument("--pixel_imprinting", action='store_true', default=False,
