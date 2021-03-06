@@ -197,7 +197,7 @@ class FGI(Trainer):
                 m = torch.eq(lbl[i], cl)
 
                 z = self.Z_dist.sample((self.z_dim,)).to(self.device)
-                fz = f.flatten(start_dim=1)[m.view(1, -1)].mean(dim=1)  # should be (2048)
+                fz = f.flatten(start_dim=1)[:, m.view(-1)].mean(dim=1)  # should be (2048)
                 fz = torch.cat((fz, z), dim=0).view(-1, 1, 1)
                 fz = fz.expand(fz.shape[0], f.shape[1], f.shape[2])
 

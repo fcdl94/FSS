@@ -125,7 +125,7 @@ def mask_features3(feat, lbl, device):
             m = torch.eq(lbl[i], cl)
 
             z = Z_dist.sample((128,)).to(device)
-            fz = f.flatten(start_dim=1)[m.view(1, -1)].mean(dim=1)  # should be (2048)
+            fz = f.flatten(start_dim=1)[:, m.view(-1)].mean(dim=1)  # should be (2048)
             fz = torch.cat((fz, z), dim=0).view(-1, 1, 1)
             fz = fz.expand(fz.shape[0], f.shape[1], f.shape[2])
 
