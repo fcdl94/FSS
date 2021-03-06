@@ -106,6 +106,39 @@ def mask_features2(feat, lbl, device):
            torch.cat(real_feat, dim=0), torch.cat(real_lbl, dim=0).long()
 
 
+def mask_features3(feat, lbl, device):
+    Z_dist = normal.Normal(0, 1)
+
+    mask_feat = []
+    real_feat = []
+    mask_lbl = []
+    real_lbl = []
+    for i in range(feat.shape[0]):  # each image independently
+        cls = lbl[i].unique()
+        cls = cls[cls != 0]  # filter out bkg and void
+        cls = cls[cls != 255]
+        f = feat[i]
+        if len(cls) > 0:
+            p = torch.ones_like(cls, dtype=torch.float32)  # make it float
+            idx = p.multinomial(num_samples=1)
+            cl = cls[idx]
+            m = torch.eq(lbl[i], cl)
+
+            z = Z_dist.sample(128).to(device)
+            fz = f.flatten(start_dim=1)[m.flatten()].mean(dim=1)  # should be (2048)
+            fz = torch.cat((fz, z), dim=0).view(-1, 1, 1)
+            fz = fz.expand(fz.shape[0], f.shape[1], f.shape[2])
+
+            mf = torch.cat((fz, m.unsqueeze(0).float()), dim=0)
+            mask_feat.append(mf.unsqueeze(0))
+
+            real_feat.append(feat[i].unsqueeze(0))
+            mask_lbl.append((lbl[i] * m.long()).unsqueeze(0))
+            real_lbl.append((lbl[i]).unsqueeze(0))
+    return torch.cat(mask_feat, dim=0), torch.cat(mask_lbl, dim=0).long(), \
+           torch.cat(real_feat, dim=0), torch.cat(real_lbl, dim=0).long()
+
+
 def mask_features1(feat, lbl):
     mask_feat = []
     real_feat = []
@@ -149,8 +182,10 @@ def train(dataloader, model, classifier, generator, device, iterations=4000, lr=
             real_feat, real_lbl = get_real_features(model, images, labels)
             if type == 1:
                 masked_feat, masked_lbl, real_feat, real_lbl = mask_features1(real_feat, real_lbl)
-            else:
+            elif type == 2:
                 masked_feat, masked_lbl, real_feat, real_lbl = mask_features2(real_feat, real_lbl, device)
+            else:
+                masked_feat, masked_lbl, real_feat, real_lbl = mask_features3(real_feat, real_lbl, device)
 
             feat = generator(masked_feat, add_z=(type == 1)).detach()
             lbl = masked_lbl
@@ -212,22 +247,24 @@ def main(opts):
 
     step_ckpt = get_step_ckpt(opts, task_name)
 
-    if not opts.type2:
+    type_ = opts.type
+    if opts.type == 1:
         z_dim = 128
         in_dim = 2048
-        type=1
-    else:
+    elif type_ == 2:
         z_dim = 0
         in_dim = 2049
-        type=2
+    elif type_ == 3:
+        z_dim = 128
+        in_dim = 2049
+    else:
+        raise NotImplementedError
 
     if opts.gen_pixtopix:
         generator = GlobalGenerator(z_dim, in_dim, 2048, ngf=opts.ngf, n_downsampling=2, n_blocks=3,
                                     norm_layer=partial(nn.InstanceNorm2d, affine=False)).to(device)
     elif opts.gen_fgpp:
         generator = FeatGeneratorPP(z_dim, in_dim, 2048, n_layer=opts.gen_nlayer).to(device)
-    elif opts.gen_fgdl:
-        gerator = FeatGeneratorDL(z_dim, in_dim, 2048, n_layer=opts.gen_nlayer).to(device)
     else:
         generator = FeatGenerator(z_dim, in_dim, 2048, n_layer=opts.gen_nlayer).to(device)
     generator.load_state_dict(step_ckpt['model_state']['generator'])
@@ -254,7 +291,7 @@ def main(opts):
     ).to(device)
 
     train(train_loader, model.eval(), new_classifier.train(), generator.eval(), device, iterations=4000,
-          lr=0.1, type=type, bce=opts.gen_mib)
+          lr=0.1, type=type_, bce=opts.gen_mib)
 
     model.head = new_classifier[0]
     model.cls = new_classifier[1]

@@ -26,24 +26,29 @@ class FGI(Trainer):
         self.n_classes = task.get_n_classes()[0]
         self.Z_dist = normal.Normal(0, 1)
 
-        if not opts.type2:
-            self.z_dim = 128
-            self.in_dim = 2048
+        if opts.type == 1:
+            self.z_dim = self.z_dim
+            self.in_dim = self.dim
             self.mask_func = self.mask_features1
             self.add_Z = True
-        else:
+        elif opts.type == 2:
             self.z_dim = 0
-            self.in_dim = 2049
+            self.in_dim = self.dim+1
             self.mask_func = self.mask_features2
             self.add_Z = False
+        elif opts.type == 3:
+            self.z_dim = self.z_dim
+            self.in_dim = self.dim+1
+            self.mask_func = self.mask_features3
+            self.add_Z = False
+        else:
+            raise Exception("Not recognized input type.")
 
         if opts.gen_pixtopix:
             self.generator = GlobalGenerator(self.z_dim, self.in_dim, self.dim, ngf=opts.ngf, n_downsampling=2, n_blocks=3,
                                              norm_layer=partial(nn.InstanceNorm2d, affine=False)).to(device)
         elif opts.gen_fgpp:
             self.generator = FeatGeneratorPP(self.z_dim, self.in_dim, self.dim, n_layer=opts.gen_nlayer).to(device)
-        elif opts.gen_fgdl:
-            self.generator = FeatGeneratorDL(self.z_dim, self.in_dim, self.dim, n_layer=opts.gen_nlayer).to(device)
         else:
             self.generator = FeatGenerator(self.z_dim, self.in_dim, self.dim, n_layer=opts.gen_nlayer).to(device)
         if self.cond_gan:
@@ -167,6 +172,38 @@ class FGI(Trainer):
                 cl = cls[idx]
                 m = torch.eq(lbl[i], cl)
                 mask_feat.append((feat[i] * m.float()).unsqueeze(0))
+                real_feat.append(feat[i].unsqueeze(0))
+                mask_lbl.append((lbl[i] * m.long()).unsqueeze(0))
+                real_lbl.append((lbl[i]).unsqueeze(0))
+        return torch.cat(mask_feat, dim=0), torch.cat(mask_lbl, dim=0).long(), \
+               torch.cat(real_feat, dim=0), torch.cat(real_lbl, dim=0).long()
+
+    def mask_features3(self, feat, lbl):
+        mask_feat = []
+        real_feat = []
+        mask_lbl = []
+        real_lbl = []
+        for i in range(feat.shape[0]):  # each image independently
+            cls = lbl[i].unique()
+            cls = cls[cls != 0]  # filter out bkg and void
+            cls = cls[cls != 255]
+            f = feat[i]
+
+            if len(cls) > 0:
+                p = torch.ones_like(cls, dtype=torch.float32)  # make it float
+                idx = p.multinomial(num_samples=1)
+                cl = cls[idx]
+
+                m = torch.eq(lbl[i], cl)
+
+                z = self.Z_dist.sample(self.z_dim).to(self.device)
+                fz = f.flatten(start_dim=1)[m.flatten()].mean(dim=1)  # should be (2048)
+                fz = torch.cat((fz, z), dim=0).view(-1, 1, 1)
+                fz = fz.expand(fz.shape[0], f.shape[1], f.shape[2])
+
+                mf = torch.cat((fz, m.unsqueeze(0).float()), dim=0)
+                mask_feat.append(mf.unsqueeze(0))
+
                 real_feat.append(feat[i].unsqueeze(0))
                 mask_lbl.append((lbl[i] * m.long()).unsqueeze(0))
                 real_lbl.append((lbl[i]).unsqueeze(0))
