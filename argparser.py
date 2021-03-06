@@ -235,6 +235,8 @@ def get_argparser():
                         help='Number of critic iterations (Def 5)')
     parser.add_argument("--gen_pixtopix", action='store_true', default=False,
                         help='Use PixToPix Generator')
+    parser.add_argument("--gen_fgpp", action='store_true', default=False,
+                        help='Use Feature Generator ++')
     parser.add_argument("--gen_cond_gan", action='store_true', default=False,
                         help='Use Conditional GAN Discriminator')
     parser.add_argument("--gen_mib", action='store_true', default=False,
