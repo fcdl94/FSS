@@ -12,7 +12,7 @@ from metrics import StreamSegMetrics
 from task import Task
 
 from modules.classifier import CosineClassifier
-from modules.generators import GlobalGenerator, FeatGenerator, FeatGeneratorPP
+from modules.generators import GlobalGenerator, FeatGenerator, FeatGeneratorPP, FeatGeneratorDL
 from methods.segmentation_module import make_model
 from functools import partial
 import torch.nn as nn
@@ -226,6 +226,8 @@ def main(opts):
                                     norm_layer=partial(nn.InstanceNorm2d, affine=False)).to(device)
     elif opts.gen_fgpp:
         generator = FeatGeneratorPP(z_dim, in_dim, 2048, n_layer=opts.gen_nlayer).to(device)
+    elif opts.gen_fgdl:
+        gerator = FeatGeneratorDL(z_dim, in_dim, 2048, n_layer=opts.gen_nlayer).to(device)
     else:
         generator = FeatGenerator(z_dim, in_dim, 2048, n_layer=opts.gen_nlayer).to(device)
     generator.load_state_dict(step_ckpt['model_state']['generator'])
