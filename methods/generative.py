@@ -76,6 +76,7 @@ class FGI(Trainer):
         self.gen_mib = opts.gen_mib
 
         if task.step > 0:
+            self.gen_weight = 1.
             if self.gen_mib:
                 self.generated_criterion = BinaryCrossEntropy()
             else:

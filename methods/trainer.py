@@ -89,9 +89,6 @@ class Trainer:
 
         self.reduction = HardNegativeMining() if opts.hnm else MeanReduction()
 
-        # Feature generation
-        self.gen_weight = 1.
-
         # Feature distillation
         if opts.l2_loss > 0 or opts.cos_loss > 0 or opts.l1_loss > 0:
             assert self.model_old is not None, "Error, model old is None but distillation specified"
@@ -218,6 +215,7 @@ class Trainer:
 
         epoch_loss = 0.0
         reg_loss = 0.0
+        gen_loss = 0.0
         interval_loss = 0.0
 
         model.train()
@@ -272,6 +270,7 @@ class Trainer:
 
                 epoch_loss += loss.item()
                 reg_loss += rloss.item()
+                gen_loss += gloss.item()
                 interval_loss += loss_tot.item()
 
                 _, prediction = outputs.max(dim=1)  # B, H, W
@@ -285,13 +284,15 @@ class Trainer:
                 if cur_step % print_int == 0:
                     interval_loss = interval_loss / print_int
                     logger.info(f"Epoch {cur_epoch}, Batch {cur_step}/{n_iter}*{len(train_loader)},"
-                                f" Loss={interval_loss}")
+                                f" Loss={interval_loss} [GL={gen_loss/print_int} RL={reg_loss/print_int}]")
                     logger.debug(f"Loss made of: CE {loss}")
                     # visualization
                     if logger is not None:
                         x = cur_epoch * len(train_loader) * n_iter + cur_step
                         logger.add_scalar('Loss', interval_loss, x)
                     interval_loss = 0.0
+                    gen_loss = 0.0
+                    reg_loss = 0.0
 
         # collect statistics from multiple processes
         epoch_loss = torch.tensor(epoch_loss).to(self.device)
