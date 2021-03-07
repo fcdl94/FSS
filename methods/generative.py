@@ -51,6 +51,7 @@ class FGI(Trainer):
             self.generator = FeatGeneratorPP(self.z_dim, self.in_dim, self.dim, n_layer=opts.gen_nlayer).to(device)
         else:
             self.generator = FeatGenerator(self.z_dim, self.in_dim, self.dim, n_layer=opts.gen_nlayer).to(device)
+
         if self.cond_gan:
             self.discriminator = nn.Sequential(
                 DeeplabV3(2048, 256, 256,
@@ -75,7 +76,10 @@ class FGI(Trainer):
         self.gen_mib = opts.gen_mib
 
         if task.step > 0:
-            self.generated_criterion = nn.CrossEntropyLoss(reduction='mean')
+            if self.gen_mib:
+                self.generated_criterion = BinaryCrossEntropy()
+            else:
+                self.generated_criterion = nn.CrossEntropyLoss(reduction='mean')
             self.generator.eval()
         else:
             self.starting_iter = 0
@@ -134,7 +138,7 @@ class FGI(Trainer):
         real_feat, real_lbl = self.get_real_features(self.model, images, labels)
         masked_feat, masked_lbl, real_feat, real_lbl = self.mask_func(real_feat, real_lbl)
 
-        gen_feat = self.generator(masked_feat).detach()
+        gen_feat = self.generator(masked_feat, add_z=self.add_Z)
 
         return gen_feat, masked_lbl
 
@@ -379,16 +383,21 @@ class FGI(Trainer):
             self.generator.to(self.device)
             self.discriminator.load_state_dict(checkpoint['discriminator'])
             self.discriminator.to(self.device)
-            if "iter" in checkpoint:
+            if "iter" in checkpoint and self.step == 0:
                 self.starting_iter = checkpoint['iter']
                 self.optim_G.load_state_dict(checkpoint['optim_G'])
                 self.optim_D.load_state_dict(checkpoint['optim_D'])
 
     def state_dict(self):
-        state = {"model": self.model.state_dict(), "optimizer": self.optimizer.state_dict(),
-                 "scheduler": self.scheduler.state_dict(),
-                 "generator": self.generator.state_dict(), "discriminator": self.discriminator.state_dict(),
-                 "iter": self.ITER, "optim_G": self.optim_G.state_dict(), "optim_D": self.optim_D.state_dict()}
+        if self.step == 0:
+            state = {"model": self.model.state_dict(), "optimizer": self.optimizer.state_dict(),
+                     "scheduler": self.scheduler.state_dict(),
+                     "generator": self.generator.state_dict(), "discriminator": self.discriminator.state_dict(),
+                     "iter": self.ITER, "optim_G": self.optim_G.state_dict(), "optim_D": self.optim_D.state_dict()}
+        else:
+            state = {"model": self.model.state_dict(), "optimizer": self.optimizer.state_dict(),
+                     "scheduler": self.scheduler.state_dict(),
+                     "generator": self.generator.state_dict(), "discriminator": self.discriminator.state_dict()}
         return state
 
 
