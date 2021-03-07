@@ -195,6 +195,8 @@ def get_argparser():
                         help='The MiB distillation loss strength (Def 0.)')
     parser.add_argument("--loss_kd", default=0, type=float,
                         help='The distillation loss strength (Def 0.)')
+    parser.add_argument("--kd_alpha", default=1, type=float,
+                        help='The temperature vale (Def 1.)')
     parser.add_argument("--l2_loss", default=0, type=float,
                         help='The MSE feature loss strength (Def 0.)')
     parser.add_argument("--loss_de", default=0, type=float,

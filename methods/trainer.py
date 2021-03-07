@@ -111,7 +111,7 @@ class Trainer:
                 if opts.ckd:
                     self.kd_criterion = CosineKnowledgeDistillationLoss(reduction='mean')
                 else:
-                    self.kd_criterion = KnowledgeDistillationLoss(reduction="mean", kl=opts.kl_div)
+                    self.kd_criterion = KnowledgeDistillationLoss(reduction="mean", kl=opts.kl_div, alpha=opts.kd_alpha)
                 self.kd_loss = opts.loss_kd
             if opts.mib_kd > 0:
                 self.kd_loss = opts.mib_kd
