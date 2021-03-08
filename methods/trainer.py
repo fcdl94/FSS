@@ -26,8 +26,8 @@ class Trainer:
         self.n_channels = -1  # features size, will be initialized in make model
         self.model = self.make_model()
         self.model = self.model.to(device)
-        for p in self.model.parameters():
-            p.register_hook(lambda grad: torch.clamp(grad, -CLIP, CLIP))
+        # for p in self.model.parameters():
+        #     p.register_hook(lambda grad: torch.clamp(grad, -CLIP, CLIP))
         self.distributed = False
         self.model_old = None
 
@@ -258,11 +258,11 @@ class Trainer:
 
                 loss = self.reduction(criterion(outputs, labels), labels)
 
-                # if rloss <= CLIP:
-                loss_tot = loss + rloss + gloss
-                # else:
-                #     print(f"Warning, rloss is {rloss}! Term ignored")
-                #     loss_tot = loss
+                if rloss <= CLIP:
+                    loss_tot = loss + rloss + gloss
+                else:
+                    print(f"Warning, rloss is {rloss}! Term ignored")
+                    loss_tot = loss + gloss
 
                 loss_tot.backward()
                 optim.step()
