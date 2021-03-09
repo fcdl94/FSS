@@ -124,7 +124,7 @@ class ABR(nn.Module):
     activation_param : float
         Negative slope for the `leaky_relu` activation.
     """
-    def __init__(self, num_features, eps=1e-9, momentum=0.0, affine=True, activation="leaky_relu",
+    def __init__(self, num_features, eps=1e-5, momentum=0.0, affine=True, activation="leaky_relu",
                  activation_param=0.01, group=distributed.group.WORLD, renorm=True):
         super(ABR, self).__init__()
         self.num_features = num_features
@@ -161,12 +161,12 @@ class ABR(nn.Module):
             bias = self.bias
         else:
             with torch.no_grad():
-                running_std = self.running_var.pow(0.5) + self.eps
+                running_std = (self.running_var + self.eps).pow(0.5)
                 xt = x.transpose(1, 0).reshape(x.shape[1], -1)
-                r = xt.std(dim=1) / running_std
+                r = (xt.var(dim=1) + self.eps).pow(0.5) / running_std
                 d = (xt.mean(dim=1) - self.running_mean) / running_std
             weight = self.weight * r
-            bias = self.bias + self.weight*d
+            bias = self.bias + self.weight * d
 
         x = functional.batch_norm(x, self.running_mean, self.running_var, weight, bias,
                                   self.training, self.momentum, self.eps)
@@ -200,7 +200,7 @@ class ABR(nn.Module):
 
 
 class InPlaceABR(ABR):
-    def __init__(self, num_features, eps=1e-8, momentum=0.0, affine=True, activation="leaky_relu",
+    def __init__(self, num_features, eps=1e-5, momentum=0.0, affine=True, activation="leaky_relu",
                  activation_param=0.01):
         super().__init__(num_features, eps, momentum, affine, activation, activation_param)
 
@@ -210,10 +210,10 @@ class InPlaceABR(ABR):
             bias = self.bias
         else:
             with torch.no_grad():
-                mean, var, count = _backend.statistics(x)
                 running_std = (self.running_var + self.eps).pow(0.5)
-                r = (var + self.eps).pow(0.5) / running_std
-                d = (mean - self.running_mean) / running_std
+                xt = x.transpose(1, 0).reshape(x.shape[1], -1)
+                r = (xt.var(dim=1) + self.eps).pow(0.5) / running_std
+                d = (xt.mean(dim=1) - self.running_mean) / running_std
             weight = self.weight * r
             bias = self.bias + self.weight * d
 

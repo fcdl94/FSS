@@ -8,7 +8,7 @@ from .segmentation_module import make_model
 from modules.classifier import IncrementalClassifier, CosineClassifier, SPNetClassifier
 from .utils import get_scheduler, MeanReduction
 
-CLIP = 100
+CLIP = 10
 
 
 class Trainer:

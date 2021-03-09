@@ -22,8 +22,6 @@ def make_model(opts, cls=None, head_channels=None):
         norm = partial(ABR, activation="leaky_relu", activation_param=.01)
     elif opts.norm_act == 'iabr':
         norm = partial(InPlaceABR, activation="leaky_relu", activation_param=.01)
-    elif opts.norm_act == 'iabrr':
-        norm = partial(InPlaceABR_R, activation="leaky_relu", activation_param=.01)
     elif opts.norm_act == 'ain':
         norm = partial(AIN, activation="leaky_relu", activation_param=.01)
     elif opts.norm_act == 'rabn':
@@ -114,7 +112,7 @@ class SegmentationModule(nn.Module):
                 m.weight.requires_grad = False
                 m.bias.requires_grad = False
 
-    def bn_set_momentum(self, momentum=0.1):
+    def bn_set_momentum(self, momentum=0.0):
         for m in self.modules():
             if isinstance(m, nn.BatchNorm2d) or isinstance(m, ABN) or isinstance(m, AIN) or isinstance(m, ABR):
                 m.momentum = momentum

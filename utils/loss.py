@@ -107,7 +107,7 @@ class KnowledgeDistillationLoss(nn.Module):
         labels = torch.softmax(targets / self.alpha, dim=1)
 
         if not self.kl:
-            loss = -(outputs * labels).mean(dim=1)
+            loss = -(outputs * labels).mean(dim=1) * (self.alpha ** 2)
         else:
             loss = F.kl_div(outputs, labels, reduction='none') * (self.alpha ** 2)
             loss = loss.sum(dim=1)
