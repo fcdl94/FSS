@@ -161,10 +161,10 @@ class BinaryCrossEntropy(nn.Module):
             if len(cls) > 1:
                 cls = cls[cls != 0][0]
                 mask = (targets[i] == cls).float()  # mask is -1 when no class, 1 otherwise
-                sel = torch.arange(0, inputs.shape[1])
+                sel = torch.arange(0, inputs.shape[1]).to(inputs.device)
                 sel = sel[sel != cls]
                 loss_ = - mask * (inputs[i, cls] - den[i])
-                loss_ += - (1-mask) * (inputs[i, sel] - den[i])
+                loss_ += - (1-mask) * (torch.logsumexp(inputs[i, sel], dim=0) - den[i])
                 loss += loss_.mean()
                 count += 1
 
