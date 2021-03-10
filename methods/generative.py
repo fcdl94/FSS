@@ -142,7 +142,7 @@ class FGI(Trainer):
 
     def generate_synth_feat(self, images=None, labels=None):
         real_feat, real_lbl = self.get_real_features(self.model, images, labels)
-        masked_feat, masked_lbl, real_feat, real_lbl = self.mask_func(real_feat, real_lbl)
+        masked_feat, masked_lbl, real_feat, real_lbl, noise = self.mask_func(real_feat, real_lbl)
 
         gen_feat = self.generator(masked_feat, add_z=self.add_Z)
 
