@@ -72,7 +72,8 @@ class FGI(Trainer):
         self.alpha = opts.gen_alpha
         self.beta = 1
         self.use_cls_loss = True
-        self.use_bkg_loss = opts.gen_use_bkg_loss
+        self.use_bkg_loss = False
+        self.anti_collapse_loss = opts.gen_acloss
         self.gen_mib = opts.gen_mib
 
         if task.step > 0:
@@ -185,13 +186,14 @@ class FGI(Trainer):
                 mask_lbl.append((lbl[i] * m.long()).unsqueeze(0))
                 real_lbl.append((lbl[i]).unsqueeze(0))
         return torch.cat(mask_feat, dim=0), torch.cat(mask_lbl, dim=0).long(), \
-               torch.cat(real_feat, dim=0), torch.cat(real_lbl, dim=0).long()
+               torch.cat(real_feat, dim=0), torch.cat(real_lbl, dim=0).long(), None
 
     def mask_features3(self, feat, lbl):
         mask_feat = []
         real_feat = []
         mask_lbl = []
         real_lbl = []
+        noise = []
         for i in range(feat.shape[0]):  # each image independently
             cls = lbl[i].unique()
             cls = cls[cls != 0]  # filter out bkg and void
@@ -212,18 +214,21 @@ class FGI(Trainer):
 
                 mf = torch.cat((fz, m.unsqueeze(0).float()), dim=0)
                 mask_feat.append(mf.unsqueeze(0))
+                noise.append(z.view(-1, 1, 1).expand(self.z_dim, f.shape[1], f.shape[2]).unsqueeze(0))
 
                 real_feat.append(feat[i].unsqueeze(0))
                 mask_lbl.append((lbl[i] * m.long()).unsqueeze(0))
                 real_lbl.append((lbl[i]).unsqueeze(0))
         return torch.cat(mask_feat, dim=0), torch.cat(mask_lbl, dim=0).long(), \
-               torch.cat(real_feat, dim=0), torch.cat(real_lbl, dim=0).long()
+               torch.cat(real_feat, dim=0), torch.cat(real_lbl, dim=0).long(), \
+               torch.cat(noise, dim=0)
 
     def mask_features2(self, feat, lbl):
         mask_feat = []
         real_feat = []
         mask_lbl = []
         real_lbl = []
+        noise = []
         for i in range(feat.shape[0]):  # each image independently
             cls = lbl[i].unique()
             cls = cls[cls != 0]  # filter out bkg and void
@@ -238,12 +243,14 @@ class FGI(Trainer):
                 fz = (feat[i] * m.float() + z * (-m.float() + 1))
                 mf = torch.cat((fz, m.unsqueeze(0).float()), dim=0)
                 mask_feat.append(mf.unsqueeze(0))
+                noise.append(z.unsqueeze(0))
 
                 real_feat.append(feat[i].unsqueeze(0))
                 mask_lbl.append((lbl[i] * m.long()).unsqueeze(0))
                 real_lbl.append((lbl[i]).unsqueeze(0))
         return torch.cat(mask_feat, dim=0), torch.cat(mask_lbl, dim=0).long(), \
-               torch.cat(real_feat, dim=0), torch.cat(real_lbl, dim=0).long()
+               torch.cat(real_feat, dim=0), torch.cat(real_lbl, dim=0).long(), \
+               torch.cat(noise, dim=0)
 
     def _gradient_penalty(self, real_data, generated_data):
         batch_size = real_data.shape[0]
@@ -306,9 +313,6 @@ class FGI(Trainer):
                 it, batch = get_batch(it, dataloader)
                 images, labels = batch[0].to(self.device), batch[1].to(self.device)
                 real_feat, real_lbl, = self.get_real_features(model, images, labels)
-                masked_feat, masked_lbl, real_feat, real_lbl = self.mask_func(real_feat, real_lbl)
-                mask = -(masked_lbl == 0).float() + 1
-                mask = mask.unsqueeze(1)
 
                 total_discr_loss = 0.
                 total_grad_penalty = 0.
@@ -317,11 +321,17 @@ class FGI(Trainer):
                 # Optimize Critic (n times)
                 #
                 for _ in range(self.n_critic):
+                    masked_feat, masked_lbl, real_feat, real_lbl, noise = self.mask_func(real_feat, real_lbl)
+                    masked_feat2, masked_lbl2, real_feat, real_lbl, noise2 = self.mask_func(real_feat, real_lbl)
+                    mask = -(masked_lbl == 0).float() + 1
+                    mask = mask.unsqueeze(1)
                     gen_feat = self.generator(masked_feat, add_z=self.add_Z)
+                    gen_feat2 = self.generator(masked_feat2, add_z=self.add_Z)
 
                     if self.cond_gan:   # compute Cond GAN loss
                         discr_loss = criterion(self.discriminator(real_feat), real_lbl)
-                        discr_loss += criterion(self.discriminator(gen_feat), torch.full_like(real_lbl, self.n_classes))
+                        discr_loss += 0.5*criterion(self.discriminator(gen_feat), torch.full_like(real_lbl, self.n_classes))
+                        discr_loss += 0.5*criterion(self.discriminator(gen_feat2), torch.full_like(real_lbl, self.n_classes))
                         grad_penalty = 0.
                     else:  # calculate normal WGAN loss
                         rf = torch.cat((real_feat, mask), dim=1)
@@ -342,10 +352,16 @@ class FGI(Trainer):
                 #
                 # Optimize Generator (n times)
                 #
+                masked_feat, masked_lbl, real_feat, real_lbl, noise = self.mask_func(real_feat, real_lbl)
+                masked_feat2, masked_lbl2, real_feat, real_lbl, noise2 = self.mask_func(real_feat, real_lbl)
+                mask = -(masked_lbl == 0).float() + 1
+                mask = mask.unsqueeze(1)
                 gen_feat = self.generator(masked_feat, add_z=self.add_Z)
+                gen_feat2 = self.generator(masked_feat2, add_z=self.add_Z)
 
                 if self.cond_gan:
                     gen_loss = criterion_gen(self.discriminator(gen_feat), masked_lbl)
+                    gen_loss += criterion_gen(self.discriminator(gen_feat2), masked_lbl)
                 else:
                     gf = torch.cat((gen_feat, mask), dim=1)
                     gen_loss = - (torch.mean(self.discriminator(gf)))
@@ -353,14 +369,19 @@ class FGI(Trainer):
 
                 if self.use_cls_loss:
                     classifier = nn.Sequential(model.head, model.cls)
-                    score = classifier(gen_feat)
-                    class_loss = criterion_gen(score, masked_lbl)
+                    score = classifier(torch.cat((gen_feat, gen_feat2), dim=0))
+                    class_loss = criterion_gen(score, torch.cat((masked_lbl, masked_lbl), dim=0))
                     get_tot_loss += self.alpha * class_loss
 
                 if self.use_bkg_loss:
                     bkg_real = self.get_bkg_proto(real_feat, masked_lbl)
                     bkg_fake = self.get_bkg_proto(gen_feat, masked_lbl)
                     ar_loss = F.cosine_similarity(bkg_real, bkg_fake)
+                    ar_loss = ar_loss.mean()
+                    get_tot_loss += self.beta * ar_loss.mean()
+
+                if self.anti_collapse_loss:
+                    ar_loss = (1 - F.cosine_similarity(noise, noise2)) / (1 - F.cosine_similarity(gen_feat, gen_feat2))
                     ar_loss = ar_loss.mean()
                     get_tot_loss += self.beta * ar_loss.mean()
 
