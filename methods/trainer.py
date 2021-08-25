@@ -2,7 +2,7 @@ import torch
 from torch import distributed
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel
-from utils.loss import HardNegativeMining, FocalLoss, KnowledgeDistillationLoss, CosineLoss, \
+from utils.loss import HardNegativeMining, FocalLoss, KnowledgeDistillationLoss, CosineLoss, OrthPrototypeLoss, \
     UnbiasedKnowledgeDistillationLoss, UnbiasedCrossEntropy, CosineKnowledgeDistillationLoss, ClassBkgLoss
 from .segmentation_module import make_model
 from modules.classifier import IncrementalClassifier, CosineClassifier, SPNetClassifier
@@ -103,6 +103,12 @@ class Trainer:
                 self.feat_criterion = CosineLoss()
         else:
             self.feat_criterion = None
+
+        if opts.ort_proto > 0:
+            self.ort_proto = opts.ort_proto
+            self.ort_proto_crit = OrthPrototypeLoss(self.task.get_n_classes())
+        else:
+            self.ort_proto_crit = None
 
         # Output distillation
         if opts.loss_kd > 0 or opts.mib_kd > 0:
@@ -254,6 +260,11 @@ class Trainer:
                 if self.bkg_dist_crit is not None:
                     rloss += self.bkg_dist * self.bkg_dist_crit(outputs, labels)
 
+                if self.ort_proto_crit is not None:
+                    if self.distributed:
+                        rloss += self.ort_proto * self.ort_proto_crit(self.model.module.cls)
+                    else:
+                        rloss += self.ort_proto * self.ort_proto_crit(self.model.cls)
                 gloss += self.generative_loss(images, labels)
 
                 loss = self.reduction(criterion(outputs, labels), labels)

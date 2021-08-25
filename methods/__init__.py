@@ -4,7 +4,7 @@ from .imprinting import *
 from .generative_AFHN import AFHN
 from .generative import FGI
 
-methods = {"FT", "SPN", "COS", "WI", 'DWI', "TWI", "AMP", "WG",
+methods = {"FT", "SPN", "COS", "WI", 'DWI', "MWI", "AMP", "WG",
            "GIFS", "LWF", "MIB", "ILT", "RT", "AFHN", "FGI", "FGI2"}
 
 
@@ -18,9 +18,9 @@ def get_method(opts, task, device, logger):
     elif opts.method == 'DWI':
         opts.method = 'COS'
         return DynamicWI(task=task, device=device, logger=logger, opts=opts)
-    elif opts.method == 'TWI':
+    elif opts.method == 'MWI':
         opts.method = 'COS'
-        return TrainedWI(task=task, device=device, logger=logger, opts=opts)
+        return MaskedWI(task=task, device=device, logger=logger, opts=opts)
     elif opts.method == 'AMP':
         opts.method = 'FT'
         return AMP(task=task, device=device, logger=logger, opts=opts)

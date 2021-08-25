@@ -79,7 +79,7 @@ class CosineKnowledgeDistillationLoss(nn.Module):
         inputs = inputs.narrow(1, 0, targets.shape[1])
 
         if self.norm == "L2":
-            loss = (inputs - targets).norm(dim=1) / inputs.shape[1]
+            loss = ((inputs - targets)**2).mean(dim=1)
         else:
             loss = (inputs - targets).mean(dim=1)
 
@@ -93,6 +93,58 @@ class CosineKnowledgeDistillationLoss(nn.Module):
         return outputs
 
 
+class OrthPrototypeLoss(nn.Module):
+    def __init__(self, classes):
+        super().__init__()
+        self.classes = classes
+        self.steps = len(classes)
+        self.novel = classes[-1]
+
+    def forward(self, classifier):
+        weights = []
+        novel_weights = classifier.cls[self.steps-1].weight.view(self.novel, -1)
+        loss = 0.
+
+        for s, clx in enumerate(self.classes):
+            if s < self.steps-1:
+                xx = classifier.cls[s].weight.detach()
+                xx = xx.view(xx.shape[0], xx.shape[1])
+                weights.append(xx)
+        weights = torch.cat(weights, dim=0)
+
+        for c in range(self.novel):
+            cl_loss = 0.
+            for i in range(len(weights)):
+                cl_loss += max(0., F.cosine_similarity(weights[i], novel_weights[c], dim=0))
+            for i in range(self.novel):
+                if i != c:
+                    cl_loss += max(0., F.cosine_similarity(novel_weights[i], novel_weights[c], dim=0))
+            loss += cl_loss / (len(weights) + len(novel_weights) - 1)
+        return loss/self.novel
+
+
+class UltimateLoss(nn.Module):
+    def __init__(self, alpha=1):
+        super().__init__()
+        self.alpha = alpha
+
+    def forward(self, inputs, body, targets, body_old):
+        inputs = inputs.narrow(1, 0, targets.shape[1])
+
+        inputs = F.interpolate(inputs, size=(body.shape[-2:]))
+        targets = F.interpolate(targets, size=(body.shape[-2:]))
+
+        outputs = torch.log_softmax(inputs, dim=1)
+        labels = torch.softmax(targets / self.alpha, dim=1)
+
+        los1 = -(outputs * labels).mean(dim=1)
+        los2 = (body - body_old).norm(dim=1)
+
+        loss = los1 * los2
+
+        return loss.mean()
+
+
 class KnowledgeDistillationLoss(nn.Module):
     def __init__(self, reduction='mean', kl=False, alpha=1.):
         super().__init__()
@@ -103,7 +155,7 @@ class KnowledgeDistillationLoss(nn.Module):
     def forward(self, inputs, targets):
         inputs = inputs.narrow(1, 0, targets.shape[1])
 
-        outputs = torch.log_softmax(inputs / self.alpha, dim=1)
+        outputs = torch.log_softmax(inputs, dim=1)
         labels = torch.softmax(targets / self.alpha, dim=1)
 
         if not self.kl:

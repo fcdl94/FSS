@@ -9,6 +9,10 @@ from torch.utils import data
 import random
 from .utils import get_batch, get_prototype
 import math
+import copy
+from modules.deeplab import DeeplabV3
+from functools import partial
+from modules.custom_bn import InPlaceABR
 
 
 class AMP(Trainer):
@@ -48,10 +52,70 @@ class AMP(Trainer):
                 model.cls.imprint_weights_class(features=features, cl=c, alpha=self.amp_alpha)
 
 
+class MaskedWI(Trainer):
+
+    def compute_weight(self, inp):
+        # input is a D dimensional prototype
+        inp = F.normalize(inp, dim=0)
+        weight = inp.mean(dim=0).view(-1, 1, 1)
+        return weight
+
+    @staticmethod
+    def get_proto(model, ds, cl, device, interpolate_label=True, return_all=False):
+        protos = []
+        for img, lbl in ds:
+            img, lbl = img.to(device), lbl.to(device)
+            mask = (lbl == cl).float()
+            img = img*mask
+            out = model(img.unsqueeze(0), use_classifier=False)
+            if interpolate_label:  # to match output size
+                lbl = F.interpolate(lbl.float().view(1, 1, lbl.shape[0], lbl.shape[1]),
+                                    size=out.shape[-2:], mode="nearest").view(out.shape[-2:]).type(torch.uint8)
+            else:  # interpolate output to match label size
+                out = F.interpolate(out, size=img.shape[-2:], mode="bilinear", align_corners=False)
+            out = out.squeeze(0)
+            out = out.view(out.shape[0], -1).t()  # (HxW) x F
+            lbl = lbl.flatten()  # Now it is (HxW)
+            if mask.sum() > 0:
+                protos.append(F.normalize((out[lbl == cl, :]), dim=1).mean(dim=0, keepdim=True))
+
+        if len(protos) > 0:
+            protos = torch.cat(protos, dim=0)
+            if return_all:
+                return protos
+            return protos.mean(dim=0)
+
+    def warm_up_(self, dataset, epochs=1):
+        model = self.model.module if self.distributed else self.model
+        model.eval()
+        classes = self.task.get_n_classes()
+        old_classes = 0
+        for c in classes[:-1]:
+            old_classes += c
+        new_classes = np.arange(old_classes, old_classes + classes[-1])
+        for c in new_classes:
+            weight = None
+            count = 0
+            with torch.no_grad():
+                while weight is None and count < 10:
+                    ds = dataset.get_k_image_of_class(cl=c, k=self.task.nshot)  # get K images of class c
+
+                    wc = get_prototype(model, ds, c, self.device, interpolate_label=False, return_all=True)
+                    if wc is not None:
+                        weight = self.compute_weight(wc)
+                    count += 1
+
+            if weight is not None:
+                model.cls.imprint_weights_class(weight, c)
+            else:
+                raise Exception(f"Unable to imprint weight of class {c} after {count} trials.")
+
+
 class WeightImprinting(Trainer):
     def __init__(self, task, device, logger, opts):
         super().__init__(task, device, logger, opts)
         self.pixel = opts.pixel_imprinting
+        self.masking = True
         if opts.weight_mix:
             self.normalize_weight = True
             self.compute_score = True
@@ -76,6 +140,7 @@ class WeightImprinting(Trainer):
                     images, labels = dataset[idx]
                     images = images.to(self.device, dtype=torch.float32)
                     labels = labels.to(self.device, dtype=torch.long)
+
                     out = model(images.unsqueeze(0), use_classifier=False)  # .squeeze_(0)
                     out_size = images.shape[-2:]
                     out = F.interpolate(out, size=out_size, mode="bilinear", align_corners=False).squeeze_(0)
@@ -290,6 +355,14 @@ class TrainedWI(Trainer):
         super(TrainedWI, self).__init__(task, device, logger, opts)
         self.dim = self.n_channels
 
+        if self.step > 0:
+            self.generator = DeeplabV3(2048, 256, 256,
+                                   norm_act=partial(InPlaceABR, activation="leaky_relu", activation_param=.01),
+                                   out_stride=opts.output_stride, pooling_size=opts.pooling,
+                                   pooling=False, last_relu=opts.relu).to(self.device)
+        else:
+            self.generator = None
+
         self.LR = opts.dyn_lr
         self.ITER = opts.dyn_iter
         self.BATCH_SIZE = 4
@@ -304,6 +377,7 @@ class TrainedWI(Trainer):
         return weight
 
     def warm_up_(self, dataset, epochs=1):
+        assert self.generator is not None
         model = self.model.module if self.distributed else self.model
         model.eval()
         classes = self.task.get_n_classes()
@@ -331,20 +405,30 @@ class TrainedWI(Trainer):
         if self.step == 0:
             # instance a new model without DDP!
             model = make_model(self.opts, CosineClassifier(self.task.get_n_classes(), channels=self.n_channels))
+
             scaler = model.cls.scaler
             state = {}
             for k, v in self.model.state_dict().items():
                 state[k[7:]] = v
             model.load_state_dict(state, strict=True)
+
+            self.generator = model.head
+            #self.generator.pooling = False
+
             model = model.to(self.device)
             model.eval()
             for p in model.body.parameters():
                 p.requires_grad = False
+            for p in model.head.parameters():
+                p.requires_grad = False
+
+            model2 = copy.deepcopy(model)
+            model2.head = self.generator.to(self.device)
 
             # instance optimizer, criterion and data
             classes = np.arange(0, self.task.get_n_classes()[0])
             classes = classes[1:]  # remove bkg ONLY from sampling
-            params = [{"params": model.cls.cls.parameters()}, {"params": model.head.parameters()}]
+            params = [{"params": model.cls.cls.parameters()}, {"params": self.generator.parameters()}]
             optimizer = torch.optim.SGD(params, lr=self.LR)
             criterion = nn.CrossEntropyLoss(ignore_index=255, reduction='mean')
 
@@ -371,7 +455,7 @@ class TrainedWI(Trainer):
                                 # print("WC is None!!")
                                 weight[c] = F.normalize(model.cls.cls[0].weight[c], dim=0)
                             else:
-                                class_weight = self.compute_weight(wc).detach()
+                                class_weight = self.compute_weight(wc)
                                 weight[c] = F.normalize(class_weight, dim=0)
                         else:
                             weight[c] = F.normalize(model.cls.cls[0].weight[c], dim=0)
@@ -412,10 +496,12 @@ class TrainedWI(Trainer):
 
     def load_state_dict(self, checkpoint, strict=True):
         super().load_state_dict(checkpoint, strict)
+        if self.step > 0:
+            self.generator.load_state_dict(checkpoint['generator'])
 
     def state_dict(self):
         state = {"model": self.model.state_dict(), "optimizer": self.optimizer.state_dict(),
-                 "scheduler": self.scheduler.state_dict()}
+                 "scheduler": self.scheduler.state_dict(), "generator": self.generator.state_dict()}
         return state
 
 

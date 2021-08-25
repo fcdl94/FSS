@@ -19,7 +19,9 @@ def modify_command_options(opts):
     if opts.method == "GIFS":
         opts.method = "WI"
         opts.norm_act = "iabr"
-        opts.l2_loss = 0.1 if opts.l2_loss == 0 else opts.l2_loss
+        # opts.l2_loss = 0.1 if opts.l2_loss == 0 else opts.l2_loss
+        opts.loss_kd = 10
+        opts.dist_warm_start = True
     elif opts.method == 'LWF':
         opts.loss_kd = 10 if opts.loss_kd == 0 else opts.loss_kd
         opts.method = "FT"
@@ -36,7 +38,7 @@ def modify_command_options(opts):
         opts.train_only_novel = True
         opts.train_only_classifier = True
         opts.method = "FT"
-        opts.lr_cls = 10
+        opts.lr_cls = 1 # need to check!
     elif opts.method == 'AFHN' and opts.step > 0:
         opts.train_only_novel = True
         opts.train_only_classifier = True
@@ -85,6 +87,8 @@ def get_argparser():
                         help="First index where to sample shots")
     parser.add_argument("--input_mix", default="novel", choices=['novel', 'both'],
                         help="Which class to use for FSL")
+    parser.add_argument("--masking", action='store_true', default=False,
+                        help='Mask old classes in incremental steps (def: False)')
 
     # Train Options
     parser.add_argument("--epochs", type=int, default=30,
@@ -192,6 +196,8 @@ def get_argparser():
                         help='The MiB distillation loss strength (Def 0.)')
     parser.add_argument("--loss_kd", default=0, type=float,
                         help='The distillation loss strength (Def 0.)')
+    parser.add_argument("--ort_proto", default=0, type=float,
+                        help='The ORT*PROTO loss strength (Def 0.)')
     parser.add_argument("--kd_alpha", default=1, type=float,
                         help='The temperature vale (Def 1.)')
     parser.add_argument("--l2_loss", default=0, type=float,
@@ -254,4 +260,7 @@ def get_argparser():
                         help="Use only a pixel for imprinting when with WI (default: False)")
     parser.add_argument("--weight_mix", action='store_true', default=False,
                         help="When doing WI, sum to proto the mix of old weights (default: False)")
+
+
+
     return parser

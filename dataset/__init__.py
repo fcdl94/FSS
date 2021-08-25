@@ -77,8 +77,8 @@ def get_dataset(opts, task, train=True):
             val_dst = Subset(train_dst, idx[train_len:], val_transform)
             train_dst_noaug = Subset(train_dst, idx[:train_len], test_transform)
         else:
-            train_dst = dataset(root=opts.data_root, task=task, train=True, transform=train_transform)
-            train_dst_noaug = dataset(root=opts.data_root, task=task, train=True, transform=test_transform)
+            train_dst = dataset(root=opts.data_root, task=task, train=True, transform=train_transform, masking=opts.masking)
+            train_dst_noaug = dataset(root=opts.data_root, task=task, train=True, transform=test_transform, masking=opts.masking)
             val_dst = dataset(root=opts.data_root, task=task, train=False, transform=val_transform)
 
         return train_dst, val_dst, train_dst_noaug
