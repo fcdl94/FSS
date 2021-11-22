@@ -2,11 +2,11 @@
 ### Fabio Cermelli, Massimiliano Mancini, Yongqin Xian, Zeynep Akata, Barbara Caputo -- BMVC 2021 (Poster) [Link](https://arxiv.org/abs/2012.01415)
 #### Official PyTorch Implementation
 
-![teaser](https://raw.githubusercontent.com/fcdl94/FSS/master/images/teaser.pdf)
+![teaser](https://raw.githubusercontent.com/fcdl94/FSS/master/images/teaser.png)
 
 Semantic segmentation models have two fundamental weaknesses: i) they require large training sets with costly pixel-level annotations, and ii) they have a static output space, constrained to the classes of the training set. Toward addressing both problems, we introduce a new task, Incremental Few-Shot Segmentation (iFSS). The goal of iFSS is to extend a pretrained segmentation model with new classes from few annotated images and without access to old training data. To overcome the limitations of existing models iniFSS, we propose Prototype-based Incremental Few-Shot Segmentation (PIFS) that couples prototype learning and knowledge distillation. PIFS exploits prototypes to initialize the classifiers of new classes, fine-tuning the network to refine its features representation. We design a prototype-based distillation loss on the scores of both old and new class prototypes to avoid overfitting and forgetting, and batch-renormalization to cope with non-i.i.d.few-shot data. We create an extensive benchmark for iFSS showing that PIFS outperforms several few-shot and incremental learning methods in all scenarios.
 
-![method](https://raw.githubusercontent.com/fcdl94/FSS/master/images/method.pdf)
+![method](https://raw.githubusercontent.com/fcdl94/FSS/master/images/method.png)
 
 ## How to run
 ### Requirements
@@ -98,8 +98,8 @@ The training will produce both an output on the terminal and it will log on tens
 After the training, it will append a row in the csv file `logs/results/<dataset>/<task>.csv`.
 
 ## Qualitative Results
-![qual-voc](https://raw.githubusercontent.com/fcdl94/FSS/master/images/qual_voc2.pdf)
-![qual-coco](https://raw.githubusercontent.com/fcdl94/FSS/master/images/qual_coco2.pdf)
+![qual-voc](https://raw.githubusercontent.com/fcdl94/FSS/master/images/qual_voc2.png)
+![qual-coco](https://raw.githubusercontent.com/fcdl94/FSS/master/images/qual_coco2.png)
 
 ## Cite us!
 Please, cite the following article when referring to this code/method.
