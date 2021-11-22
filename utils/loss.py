@@ -3,72 +3,6 @@ import torch.nn.functional as F
 import torch
 
 
-class FocalLoss(nn.Module):
-    def __init__(self, alpha=1, gamma=2, ignore_index=255, reduction="none"):
-        super(FocalLoss, self).__init__()
-        self.alpha = alpha
-        self.gamma = gamma
-        self.ignore_index = ignore_index
-        self.reduction = reduction
-
-    def forward(self, inputs, targets):
-        ce_loss = F.cross_entropy(inputs, targets, reduction='none', ignore_index=self.ignore_index)
-        pt = torch.exp(-ce_loss)
-        focal_loss = self.alpha * (1-pt)**self.gamma * ce_loss
-        if self.reduction == "mean":
-            return focal_loss.mean()
-        elif self.reduction == 'sum':
-            return focal_loss.sum()
-        else:
-            return focal_loss
-
-
-class HardNegativeMining(nn.Module):
-    def __init__(self, perc=0.25):
-        super().__init__()
-        self.perc = perc
-
-    def forward(self, loss, target=None):
-        # inputs should be B, H, W
-        B = loss.shape[0]
-        loss = loss.reshape(B, -1)
-        P = loss.shape[1]
-        tk = loss.topk(dim=1, k=int(self.perc*P))
-        loss = tk[0].mean()
-        return loss
-
-
-class EntropyLoss(nn.Module):
-    def __init__(self, reduction='mean'):
-        super().__init__()
-        self.reduction = reduction
-
-    def forward(self, inputs):
-        prob = torch.softmax(inputs, dim=1)
-        log_prob = torch.log_softmax(inputs, dim=1)
-        loss = (log_prob * prob).sum(dim=1)
-        if self.reduction == 'mean':
-            loss = torch.mean(loss)
-        elif self.reduction == 'sum':
-            loss = torch.sum(loss)
-        return -loss
-
-
-class ClassBkgLoss(nn.Module):
-    def __init__(self, novel_classes):
-        super().__init__()
-        self.novel_classes = novel_classes
-
-    def forward(self, scores, targets):
-
-        loss = scores[:, -self.novel_classes:]
-        loss = loss.permute(0, 2, 3, 1).flatten(end_dim=2)
-        targets = targets.flatten()
-        loss = loss[targets == 0].mean()
-
-        return loss
-
-
 class CosineKnowledgeDistillationLoss(nn.Module):
     def __init__(self, reduction='mean', norm='L2'):
         super().__init__()
@@ -93,64 +27,11 @@ class CosineKnowledgeDistillationLoss(nn.Module):
         return outputs
 
 
-class OrthPrototypeLoss(nn.Module):
-    def __init__(self, classes):
-        super().__init__()
-        self.classes = classes
-        self.steps = len(classes)
-        self.novel = classes[-1]
-
-    def forward(self, classifier):
-        weights = []
-        novel_weights = classifier.cls[self.steps-1].weight.view(self.novel, -1)
-        loss = 0.
-
-        for s, clx in enumerate(self.classes):
-            if s < self.steps-1:
-                xx = classifier.cls[s].weight.detach()
-                xx = xx.view(xx.shape[0], xx.shape[1])
-                weights.append(xx)
-        weights = torch.cat(weights, dim=0)
-
-        for c in range(self.novel):
-            cl_loss = 0.
-            for i in range(len(weights)):
-                cl_loss += max(0., F.cosine_similarity(weights[i], novel_weights[c], dim=0))
-            for i in range(self.novel):
-                if i != c:
-                    cl_loss += max(0., F.cosine_similarity(novel_weights[i], novel_weights[c], dim=0))
-            loss += cl_loss / (len(weights) + len(novel_weights) - 1)
-        return loss/self.novel
-
-
-class UltimateLoss(nn.Module):
-    def __init__(self, alpha=1):
-        super().__init__()
-        self.alpha = alpha
-
-    def forward(self, inputs, body, targets, body_old):
-        inputs = inputs.narrow(1, 0, targets.shape[1])
-
-        inputs = F.interpolate(inputs, size=(body.shape[-2:]))
-        targets = F.interpolate(targets, size=(body.shape[-2:]))
-
-        outputs = torch.log_softmax(inputs, dim=1)
-        labels = torch.softmax(targets / self.alpha, dim=1)
-
-        los1 = -(outputs * labels).mean(dim=1)
-        los2 = (body - body_old).norm(dim=1)
-
-        loss = los1 * los2
-
-        return loss.mean()
-
-
 class KnowledgeDistillationLoss(nn.Module):
-    def __init__(self, reduction='mean', kl=False, alpha=1.):
+    def __init__(self, reduction='mean', alpha=1.):
         super().__init__()
         self.reduction = reduction
         self.alpha = alpha
-        self.kl = kl
 
     def forward(self, inputs, targets):
         inputs = inputs.narrow(1, 0, targets.shape[1])
@@ -158,11 +39,7 @@ class KnowledgeDistillationLoss(nn.Module):
         outputs = torch.log_softmax(inputs, dim=1)
         labels = torch.softmax(targets / self.alpha, dim=1)
 
-        if not self.kl:
-            loss = -(outputs * labels).mean(dim=1) * (self.alpha ** 2)
-        else:
-            loss = F.kl_div(outputs, labels, reduction='none') * (self.alpha ** 2)
-            loss = loss.sum(dim=1)
+        loss = -(outputs * labels).mean(dim=1) * (self.alpha ** 2)
 
         if self.reduction == 'mean':
             outputs = torch.mean(loss)
@@ -196,31 +73,6 @@ class UnbiasedCrossEntropy(nn.Module):
         loss = F.nll_loss(outputs, labels, ignore_index=self.ignore_index, reduction=self.reduction)
 
         return loss
-
-
-# Generator Loss
-class BinaryCrossEntropy(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, inputs, targets):
-
-        loss = 0.
-        count = 0
-        den = torch.logsumexp(inputs, dim=1)  # B, H, W       den of softmax
-        for i in range(len(inputs)):
-            cls = torch.unique(targets[i])
-            if len(cls) > 1:
-                cls = cls[cls != 0][0]
-                mask = (targets[i] == cls).float()  # mask is -1 when no class, 1 otherwise
-                sel = torch.arange(0, inputs.shape[1]).to(inputs.device)
-                sel = sel[sel != cls]
-                loss_ = - mask * (inputs[i, cls] - den[i])
-                loss_ += - (1-mask) * (torch.logsumexp(inputs[i, sel], dim=0) - den[i])
-                loss += loss_.mean()
-                count += 1
-
-        return loss / count if count > 0 else 0.
 
 
 class UnbiasedKnowledgeDistillationLoss(nn.Module):

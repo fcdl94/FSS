@@ -2,8 +2,8 @@ import torch
 from torch import distributed
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel
-from utils.loss import HardNegativeMining, FocalLoss, KnowledgeDistillationLoss, CosineLoss, OrthPrototypeLoss, \
-    UnbiasedKnowledgeDistillationLoss, UnbiasedCrossEntropy, CosineKnowledgeDistillationLoss, ClassBkgLoss
+from utils.loss import KnowledgeDistillationLoss, CosineLoss, \
+    UnbiasedKnowledgeDistillationLoss, UnbiasedCrossEntropy, CosineKnowledgeDistillationLoss
 from .segmentation_module import make_model
 from modules.classifier import IncrementalClassifier, CosineClassifier, SPNetClassifier
 from .utils import get_scheduler, MeanReduction
@@ -26,8 +26,7 @@ class Trainer:
         self.n_channels = -1  # features size, will be initialized in make model
         self.model = self.make_model()
         self.model = self.model.to(device)
-        # for p in self.model.parameters():
-        #     p.register_hook(lambda grad: torch.clamp(grad, -CLIP, CLIP))
+
         self.distributed = False
         self.model_old = None
 
@@ -79,15 +78,13 @@ class Trainer:
         self.logger.debug("Optimizer:\n%s" % self.optimizer)
 
         reduction = 'none'
-        if opts.focal:
-            self.criterion = FocalLoss(ignore_index=255, reduction=reduction)
-        elif opts.mib_ce:
+        if opts.mib_ce:
             self.criterion = UnbiasedCrossEntropy(old_cl=len(self.task.get_old_labels()),
                                                   ignore_index=255, reduction=reduction)
         else:
             self.criterion = nn.CrossEntropyLoss(ignore_index=255, reduction=reduction)
 
-        self.reduction = HardNegativeMining() if opts.hnm else MeanReduction()
+        self.reduction = MeanReduction()
 
         # Feature distillation
         if opts.l2_loss > 0 or opts.cos_loss > 0 or opts.l1_loss > 0:
@@ -104,12 +101,6 @@ class Trainer:
         else:
             self.feat_criterion = None
 
-        if opts.ort_proto > 0:
-            self.ort_proto = opts.ort_proto
-            self.ort_proto_crit = OrthPrototypeLoss(self.task.get_n_classes())
-        else:
-            self.ort_proto_crit = None
-
         # Output distillation
         if opts.loss_kd > 0 or opts.mib_kd > 0:
             assert self.model_old is not None, "Error, model old is None but distillation specified"
@@ -117,7 +108,7 @@ class Trainer:
                 if opts.ckd:
                     self.kd_criterion = CosineKnowledgeDistillationLoss(reduction='mean')
                 else:
-                    self.kd_criterion = KnowledgeDistillationLoss(reduction="mean", kl=opts.kl_div, alpha=opts.kd_alpha)
+                    self.kd_criterion = KnowledgeDistillationLoss(reduction="mean", alpha=opts.kd_alpha)
                 self.kd_loss = opts.loss_kd
             if opts.mib_kd > 0:
                 self.kd_loss = opts.mib_kd
@@ -133,13 +124,6 @@ class Trainer:
         else:
             self.de_criterion = None
 
-        # Regularization
-        if opts.bkg_dist > 0:
-            self.bkg_dist = opts.bkg_dist
-            self.bkg_dist_crit = ClassBkgLoss(self.novel_classes)
-        else:
-            self.bkg_dist_crit = None
-
     def make_model(self, is_old=False):
         classifier, self.n_channels = self.get_classifier(is_old)
         model = make_model(self.opts, classifier)
@@ -150,8 +134,8 @@ class Trainer:
         if self.model is not None:
             # Put the model on GPU
             self.distributed = True
-            self.model = DistributedDataParallel(self.model, device_ids=[opts.local_rank],
-                                                 output_device=opts.local_rank, find_unused_parameters=False)
+            self.model = DistributedDataParallel(self.model, device_ids=[opts.device_id],
+                                                 output_device=opts.device_id, find_unused_parameters=False)
 
     def get_classifier(self, is_old=False):
         # here distinguish methods!
@@ -200,12 +184,6 @@ class Trainer:
     def cool_down(self, dataset, epochs=1):
         pass
 
-    def generative_loss(self, images=None, labels=None):
-        return 0.
-
-    def generate_synth_feat(self, images=None, labels=None):
-        return None
-
     def train(self, cur_epoch, train_loader, metrics=None, print_int=10, n_iter=1):
         """Train and return epoch loss"""
         if metrics is not None:
@@ -221,7 +199,6 @@ class Trainer:
 
         epoch_loss = 0.0
         reg_loss = 0.0
-        gen_loss = 0.0
         interval_loss = 0.0
 
         model.train()
@@ -239,7 +216,6 @@ class Trainer:
                 labels = labels.to(device, dtype=torch.long)
 
                 rloss = torch.tensor([0.]).to(self.device)
-                gloss = torch.tensor([0.]).to(self.device)
 
                 optim.zero_grad()
                 outputs, feat, body = model(images, return_feat=True, return_body=True)
@@ -257,23 +233,14 @@ class Trainer:
                         de_loss = self.de_loss * self.de_criterion(feat, feat_old)
                         rloss += de_loss
 
-                if self.bkg_dist_crit is not None:
-                    rloss += self.bkg_dist * self.bkg_dist_crit(outputs, labels)
-
-                if self.ort_proto_crit is not None:
-                    if self.distributed:
-                        rloss += self.ort_proto * self.ort_proto_crit(self.model.module.cls)
-                    else:
-                        rloss += self.ort_proto * self.ort_proto_crit(self.model.cls)
-                gloss += self.generative_loss(images, labels)
-
                 loss = self.reduction(criterion(outputs, labels), labels)
 
+                # Since we noted sometimes that rloss spikes, we added a CLIP value to remove it if higher
                 if rloss <= CLIP:
-                    loss_tot = loss + rloss + gloss
+                    loss_tot = loss + rloss
                 else:
                     print(f"Warning, rloss is {rloss}! Term ignored")
-                    loss_tot = loss + gloss
+                    loss_tot = loss
 
                 loss_tot.backward()
                 optim.step()
@@ -281,7 +248,6 @@ class Trainer:
 
                 epoch_loss += loss.item()
                 reg_loss += rloss.item()
-                gen_loss += gloss.item()
                 interval_loss += loss_tot.item()
 
                 _, prediction = outputs.max(dim=1)  # B, H, W
@@ -295,14 +261,13 @@ class Trainer:
                 if cur_step % print_int == 0:
                     interval_loss = interval_loss / print_int
                     logger.info(f"Epoch {cur_epoch}, Batch {cur_step}/{n_iter}*{len(train_loader)},"
-                                f" Loss={interval_loss} [GL={gen_loss/print_int} RL={reg_loss/print_int}]")
+                                f" Loss={interval_loss} RL={reg_loss/print_int}]")
                     logger.debug(f"Loss made of: CE {loss}")
                     # visualization
                     if logger is not None:
                         x = cur_epoch * len(train_loader) * n_iter + cur_step
                         logger.add_scalar('Loss', interval_loss, x)
                     interval_loss = 0.0
-                    gen_loss = 0.0
                     reg_loss = 0.0
 
         # collect statistics from multiple processes

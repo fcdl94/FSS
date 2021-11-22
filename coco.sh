@@ -1,8 +1,8 @@
 #!/bin/bash
 
 export CUDA_VISIBLE_DEVICES=$1
-port=$2
-alias exp="python -m torch.distributed.launch --master_port ${port} --nproc_per_node=1 run.py --opt_level O0"
+port=$(python get_free_port.py)
+alias exp="python -m torch.distributed.launch --master_port ${port} --nproc_per_node=1 run.py"
 shopt -s expand_aliases
 
 task=$3  # 20-0, 20-1, 20-2, 20-3

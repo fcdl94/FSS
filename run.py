@@ -89,6 +89,7 @@ def main(opts):
         torch.cuda.set_device(opts.device)
     else:
         torch.cuda.set_device(device_id)
+    opts.device_id = device_id
 
     task = Task(opts)
 

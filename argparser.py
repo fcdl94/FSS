@@ -16,10 +16,9 @@ def modify_command_options(opts):
     if opts.backbone is None:
         opts.backbone = 'resnet101'
 
-    if opts.method == "GIFS":
+    if opts.method == "PIFS":
         opts.method = "WI"
         opts.norm_act = "iabr"
-        # opts.l2_loss = 0.1 if opts.l2_loss == 0 else opts.l2_loss
         opts.loss_kd = 10
         opts.dist_warm_start = True
     elif opts.method == 'LWF':
@@ -38,7 +37,7 @@ def modify_command_options(opts):
         opts.train_only_novel = True
         opts.train_only_classifier = True
         opts.method = "FT"
-        opts.lr_cls = 1 # need to check!
+        opts.lr_cls = 1
     elif opts.method == 'AFHN' and opts.step > 0:
         opts.train_only_novel = True
         opts.train_only_classifier = True
@@ -66,7 +65,6 @@ def get_argparser():
                         help="random seed (default: 42)")
     parser.add_argument("--num_workers", type=int, default=2,
                         help='number of workers (default: 2)')
-    parser.add_argument('--opt_level', type=str, choices=['O0', 'O1', 'O2', 'O3'], default='O0')
     parser.add_argument("--device", type=int, default=None,
                         help='Specify the device you want to use.')
 
@@ -74,7 +72,7 @@ def get_argparser():
     parser.add_argument("--data_root", type=str, default="data",
                         help="path to Dataset")
     parser.add_argument("--dataset", type=str, default='voc',
-                        choices=['voc', 'cts', 'coco', 'coco-stuff'], help='Name of dataset')
+                        choices=['voc', 'coco', 'coco-stuff'], help='Name of dataset')
 
     # Task Options
     parser.add_argument("--step", type=int, default=0,
@@ -162,10 +160,6 @@ def get_argparser():
                         help='Use this to enable last BN+ReLU on Deeplab-v3 (def. False)')
     parser.add_argument("--no_pooling", default=False, action='store_true',
                         help='Use this to DIS-enable Pooling in Deeplab-v3 (def. False)')
-    parser.add_argument("--hnm", default=False, action='store_true',
-                        help='Use this to enable Hard Negative Mining (def. False)')
-    parser.add_argument("--focal", default=False, action='store_true',
-                        help='Use this to enable Focal Loss (def. False)')
 
     # Test and Checkpoint options
     parser.add_argument("--test",  action='store_true', default=False,
@@ -179,6 +173,7 @@ def get_argparser():
     parser.add_argument("--cross_val", action='store_true', default=False,
                         help="If validate on training or on validation (default: Val)")
 
+    # Checkpoint to start in IL steps
     parser.add_argument("--step_ckpt", default=None, type=str,
                         help="path to trained model at previous step. Leave it None if you want to use def path")
 
@@ -188,6 +183,7 @@ def get_argparser():
     parser.add_argument("--embedding", type=str, default="fastnvec", choices=['word2vec', 'fasttext', 'fastnvec'])
     parser.add_argument("--amp_alpha", type=float, default=0.25,
                         help='Alpha value for the proxy adaptation.')
+    # parameters for IL methods
     parser.add_argument("--mib_ce", default=False, action='store_true',
                         help='Use the MiB classification loss (Def No)')
     parser.add_argument("--init_mib", default=False, action='store_true',
@@ -196,22 +192,17 @@ def get_argparser():
                         help='The MiB distillation loss strength (Def 0.)')
     parser.add_argument("--loss_kd", default=0, type=float,
                         help='The distillation loss strength (Def 0.)')
-    parser.add_argument("--ort_proto", default=0, type=float,
-                        help='The ORT*PROTO loss strength (Def 0.)')
     parser.add_argument("--kd_alpha", default=1, type=float,
-                        help='The temperature vale (Def 1.)')
+                        help='The temperature value of KD loss (Def 1.)')
+    # other distillation choices on features
     parser.add_argument("--l2_loss", default=0, type=float,
-                        help='The MSE feature loss strength (Def 0.)')
+                        help='The MSE feature (Deeplab-output) loss strength (Def 0.)')
     parser.add_argument("--loss_de", default=0, type=float,
-                        help='The MSE-body feature loss strength (Def 0.)')
+                        help='The MSE on body (resnet-output) feature loss strength (Def 0.)')
     parser.add_argument("--l1_loss", default=0, type=float,
                         help='The L1 feature loss strength (Def 0.)')
     parser.add_argument("--cos_loss", default=0, type=float,
-                        help='The feature loss strength (Def 0.)')
-    parser.add_argument("--bkg_dist", default=0, type=float,
-                        help='The feature loss strength (Def 0.)')
-    parser.add_argument("--kl_div", default=False, action='store_true',
-                        help='Use true KL loss and not the CE loss.')
+                        help='The Cosine distillation on feature loss strength (Def 0.)')
     parser.add_argument("--ckd", default=False, action='store_true',
                         help='Use cosine KD loss and not the CE loss.')
     parser.add_argument("--dist_warm_start", default=False, action='store_true',
@@ -225,42 +216,10 @@ def get_argparser():
                         help="Train only the classifier of current step (default: False)")
     parser.add_argument("--bn_momentum", default=None, type=float,
                         help="The BN momentum (Set to 0.1 to update of running stats of ABR.)")
-
+    # Parameters for DWI
     parser.add_argument("--dyn_lr", default=1., type=float,
                         help='LR for DynWI (Def 1)')
     parser.add_argument("--dyn_iter", default=1000, type=int,
                         help='Iterations for DynWI (Def 1000)')
-
-    parser.add_argument("--gen_acloss",  action='store_true', default=False,
-                        help='Use BKG loss for generation (Def False)')
-    parser.add_argument("--gen_lr", default=0.00001, type=float,
-                        help='LR for Generation (Def 1e-5)')
-    parser.add_argument("--gen_alpha", default=1., type=float,
-                        help='CrossEntropy Weight (Def 1)')
-    parser.add_argument("--gen_iter", default=10000, type=int,
-                        help='Iterations for Generation (Def 1e5)')
-    parser.add_argument("--gen_ncritic", default=5, type=int,
-                        help='Number of critic iterations (Def 5)')
-    parser.add_argument("--gen_pixtopix", action='store_true', default=False,
-                        help='Use PixToPix Generator')
-    parser.add_argument("--gen_fgpp", action='store_true', default=False,
-                        help='Use Feature Generator ++')
-    parser.add_argument("--gen_cond_gan", action='store_true', default=False,
-                        help='Use Conditional GAN Discriminator')
-    parser.add_argument("--gen_mib", action='store_true', default=False,
-                        help='Use MiB CrossEntropy on Generator.')
-    parser.add_argument("--gen_nlayer", default=0, type=int,
-                        help='Number of Res layers to use in generator.')
-    parser.add_argument("--ngf", default=64, type=int,
-                        help='Feature Generator Size (def 64)')
-    parser.add_argument("--type", default=3, type=int,
-                        help='Type of generator input.')
-    # to remove
-    parser.add_argument("--pixel_imprinting", action='store_true', default=False,
-                        help="Use only a pixel for imprinting when with WI (default: False)")
-    parser.add_argument("--weight_mix", action='store_true', default=False,
-                        help="When doing WI, sum to proto the mix of old weights (default: False)")
-
-
 
     return parser
