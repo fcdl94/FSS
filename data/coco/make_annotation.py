@@ -5,11 +5,11 @@ import os.path as osp
 from tqdm import tqdm
 
 orig_path = '.'  # insert here the source path where original COCO annotations are
-dest_path = '.'  # the destination folder, which should be this one'
+dest_path = '.'  # and the destination folder
 
 for split in ["train2017", "val2017"]:
     annotations = f"{orig_path}/annotations/{split}"
-    nov_ann = f"{dest_path}/annotations_my/{split}"
+    nov_ann = f"{dest_path}/annotations/{split}"
 
     # clear folder if exists
     if osp.exists(nov_ann):

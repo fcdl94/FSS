@@ -35,11 +35,21 @@ def make_model(opts, cls=None, head_channels=None):
     if not opts.no_pretrained:
         pretrained_path = f'pretrained/{opts.backbone}_iabn_sync.pth.tar'  # Use always iabn_sync model
         pre_dict = torch.load(pretrained_path, map_location='cpu')
-        del pre_dict['state_dict']['classifier.fc.weight']
-        del pre_dict['state_dict']['classifier.fc.bias']
 
-        body.load_state_dict(pre_dict['state_dict'])
+        new_state = {}
+        for k, v in pre_dict['state_dict'].items():
+            if "module" in k:
+                new_state[k[7:]] = v
+            else:
+                new_state[k] = v
+
+        if 'classifier.fc.weight' in new_state:
+            del new_state['classifier.fc.weight']
+            del new_state['classifier.fc.bias']
+
+        body.load_state_dict(new_state)
         del pre_dict  # free memory
+        del new_state
 
     if cls is None:
         if head_channels is None:
