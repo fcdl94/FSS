@@ -105,15 +105,7 @@ class WeightImprinting(Trainer):
                                 oi = oi[1:].softmax(dim=0)  # make softmax on base classes / bkg -> C_b x P_c
                                 oi_acc[c - old_classes] += oi.mean(dim=1)
 
-                            if self.pixel:
-                                feat = F.normalize(feat, dim=0).t()
-                                p = model.cls.cls[0].weight[0].view(1, 256).detach()
-                                # p = p / p.norm()
-                                bkg_score = -(feat * p).sum(dim=1)
-                                max_score, max_idx = bkg_score.max(dim=0)
-                                feat = feat[max_idx]
-                            else:
-                                feat = F.normalize(F.normalize(feat, dim=0).sum(dim=1), dim=0)
+                            feat = F.normalize(F.normalize(feat, dim=0).sum(dim=1), dim=0)
                             sum_features[c - old_classes] += feat
                             count[c - old_classes] += 1
 
