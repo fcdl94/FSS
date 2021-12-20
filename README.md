@@ -1,5 +1,5 @@
 # Prototype-based Incremental Few-Shot Semantic Segmentation 
-### Fabio Cermelli, Massimiliano Mancini, Yongqin Xian, Zeynep Akata, Barbara Caputo -- BMVC 2021 (Poster) [Link](https://arxiv.org/abs/2012.01415)
+### Fabio Cermelli, Massimiliano Mancini, Yongqin Xian, Zeynep Akata, Barbara Caputo -- BMVC 2021 (Poster) [Link](https://arxiv.org/abs/2012.01415) [Supp](https://github.com/fcdl94/FSS/files/7733989/supp.pdf)
 #### Official PyTorch Implementation
 
 ![teaser](https://raw.githubusercontent.com/fcdl94/FSS/master/images/teaser.png)
